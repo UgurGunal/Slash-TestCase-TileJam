@@ -98,6 +98,13 @@ namespace LevelData
             }
 
             spec = new LevelBoardSpec(width, height, depth, cells);
+            if (!LevelLayoutRules.Validate(spec, out var layoutError))
+            {
+                spec = null;
+                error = layoutError;
+                return false;
+            }
+
             return true;
         }
 

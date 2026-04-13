@@ -8,8 +8,8 @@ namespace Presentation
     {
         [Header("Source (first wins: assigned TextAsset, else Resources path)")]
         [SerializeField] TextAsset levelJson;
-        [Tooltip("Path relative to a Resources folder, without extension. Example: Levels/level_demo for Assets/Resources/Levels/level_demo.json")]
-        [SerializeField] string resourcesLevelPath = "Levels/level_demo";
+        [Tooltip("Path relative to a Resources folder, without extension. Example: Levels/level_1 for Assets/Resources/Levels/level_1.json")]
+        [SerializeField] string resourcesLevelPath = "Levels/level_1";
 
         [Header("Board")]
         [SerializeField] RectTransform boardRoot;
