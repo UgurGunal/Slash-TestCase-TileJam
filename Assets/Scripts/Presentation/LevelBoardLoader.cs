@@ -105,6 +105,7 @@ namespace Presentation
                 if (!spec.TryGet(x, y, l, out var kind)) continue;
 
                 var view = Instantiate(tilePrefab, boardRoot);
+                view.gameObject.name = $"Tile_L{l}_R{y}_C{x}";
                 var pos = GridToAnchored(spec.Width, spec.Height, x, y, cellSize);
                 view.Bind(kind, x, y, l, pos, cell, tileIconLibrary);
             }
