@@ -16,7 +16,13 @@ namespace Presentation
         [SerializeField] BoardTileView tilePrefab;
         [Tooltip("Optional: 15 sprites (Type0–Type14). Empty slots use Resources/TileIcons/{name}.")]
         [SerializeField] TileIconLibrary tileIconLibrary;
-        [SerializeField] float cellSize = 100f;
+
+        [Header("Cell size (canvas units)")]
+        [Tooltip("Grid spacing and tile root width. If ≤ 0, falls back to 100.")]
+        [SerializeField] float cellWidth = 100f;
+        [Tooltip("Grid spacing and tile root height. If ≤ 0, falls back to 100.")]
+        [SerializeField] float cellHeight = 100f;
+
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
 
@@ -97,24 +103,32 @@ namespace Presentation
 
         void Spawn(LevelBoardSpec spec)
         {
-            var cell = new Vector2(cellSize, cellSize);
+            var cell = ResolveCellSize();
             for (var l = 0; l < spec.Depth; l++)
-            for (var y = 0; y < spec.Height; y++)
+            // UI: later siblings draw on top — spawn bottom row (y = 0) last so it sorts above upper rows.
+            for (var y = spec.Height - 1; y >= 0; y--)
             for (var x = 0; x < spec.Width; x++)
             {
                 if (!spec.TryGet(x, y, l, out var kind)) continue;
 
                 var view = Instantiate(tilePrefab, boardRoot);
                 view.gameObject.name = $"Tile_L{l}_R{y}_C{x}";
-                var pos = GridToAnchored(spec.Width, spec.Height, x, y, cellSize);
+                var pos = GridToAnchored(spec.Width, spec.Height, x, y, cell);
                 view.Bind(kind, x, y, l, pos, cell, tileIconLibrary);
             }
         }
 
-        static Vector2 GridToAnchored(int width, int height, int x, int y, float cellSize)
+        Vector2 ResolveCellSize()
         {
-            var ox = (x + 0.5f - width * 0.5f) * cellSize;
-            var oy = (y + 0.5f - height * 0.5f) * cellSize;
+            var w = cellWidth > 0f ? cellWidth : 100f;
+            var h = cellHeight > 0f ? cellHeight : 100f;
+            return new Vector2(w, h);
+        }
+
+        static Vector2 GridToAnchored(int width, int height, int x, int y, Vector2 cell)
+        {
+            var ox = (x + 0.5f - width * 0.5f) * cell.x;
+            var oy = (y + 0.5f - height * 0.5f) * cell.y;
             return new Vector2(ox, oy);
         }
     }
