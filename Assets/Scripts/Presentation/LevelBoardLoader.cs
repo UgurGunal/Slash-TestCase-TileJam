@@ -1,7 +1,7 @@
-using TileMatch.LevelData;
+using LevelData;
 using UnityEngine;
 
-namespace TileMatch.Presentation
+namespace Presentation
 {
     /// <summary>Loads a JSON level grid and instantiates <see cref="BoardTileView"/> under <see cref="boardRoot"/>.</summary>
     public sealed class LevelBoardLoader : MonoBehaviour
@@ -14,6 +14,8 @@ namespace TileMatch.Presentation
         [Header("Board")]
         [SerializeField] RectTransform boardRoot;
         [SerializeField] BoardTileView tilePrefab;
+        [Tooltip("Optional: 15 sprites (Type0–Type14). Empty slots use Resources/TileIcons/{name}.")]
+        [SerializeField] TileIconLibrary tileIconLibrary;
         [SerializeField] float cellSize = 100f;
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
@@ -104,7 +106,7 @@ namespace TileMatch.Presentation
 
                 var view = Instantiate(tilePrefab, boardRoot);
                 var pos = GridToAnchored(spec.Width, spec.Height, x, y, cellSize);
-                view.Bind(kind, x, y, l, pos, cell);
+                view.Bind(kind, x, y, l, pos, cell, tileIconLibrary);
             }
         }
 

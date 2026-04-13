@@ -1,4 +1,4 @@
-namespace TileMatch.Core
+namespace Core
 {
     public enum GamePhase
     {

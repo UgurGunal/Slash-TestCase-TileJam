@@ -1,4 +1,4 @@
-namespace TileMatch.Core
+namespace Core
 {
     /// <summary>
     /// Playable icons: <see cref="Type0"/>–<see cref="Type14"/>. <see cref="None"/> = no tile (e.g. failed <c>TryGet</c>); empty board cells use <c>null</c> in level data, not <see cref="None"/>.

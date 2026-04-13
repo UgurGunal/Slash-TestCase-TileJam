@@ -1,9 +1,9 @@
 using System;
 using System.Text;
 using Newtonsoft.Json;
-using TileMatch.Core;
+using Core;
 
-namespace TileMatch.LevelData
+namespace LevelData
 {
     public static class LevelGridParser
     {

@@ -1,4 +1,4 @@
-namespace TileMatch.Core
+namespace Core
 {
     /// <summary>
     /// Extension point: UI, audio, analytics, tutorials subscribe without changing session logic.

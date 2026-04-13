@@ -1,4 +1,4 @@
-namespace TileMatch.Core
+namespace Core
 {
     public sealed class NullTileMatchObserver : ITileMatchObserver
     {

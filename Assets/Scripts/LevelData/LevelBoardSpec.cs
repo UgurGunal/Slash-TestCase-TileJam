@@ -1,6 +1,6 @@
-using TileMatch.Core;
+using Core;
 
-namespace TileMatch.LevelData
+namespace LevelData
 {
     /// <summary>Validated board layout: optional tile per (x, y, layer).</summary>
     public sealed class LevelBoardSpec

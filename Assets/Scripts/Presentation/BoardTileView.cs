@@ -1,18 +1,22 @@
-using TileMatch.Core;
+using Core;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace TileMatch.Presentation
+namespace Presentation
 {
     /// <summary>
     /// Root tile object: expects direct children named <see cref="ChildBackgroundName"/> and <see cref="ChildIconName"/>,
     /// each with an <see cref="Image"/> (created automatically in <see cref="Reset"/> when missing).
+    /// Icon sprite comes from <see cref="TileIconLibrary"/> or <c>Resources/TileIcons/{TileKind}</c> (e.g. Type0).
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public sealed class BoardTileView : MonoBehaviour
     {
         public const string ChildBackgroundName = "Background";
         public const string ChildIconName = "Icon";
+
+        /// <summary>Resources path prefix; loads <c>Resources/TileIcons/Type0</c> etc. when library has no sprite.</summary>
+        public const string TileIconsResourcesFolder = "TileIcons";
 
         [SerializeField] Image background;
         [SerializeField] Image icon;
@@ -24,7 +28,7 @@ namespace TileMatch.Presentation
 
         void Awake() => ResolveChildImages();
 
-        public void Bind(TileKind kind, int gridX, int gridY, int layerIndex, Vector2 anchoredPosition, Vector2 cellSize)
+        public void Bind(TileKind kind, int gridX, int gridY, int layerIndex, Vector2 anchoredPosition, Vector2 cellSize, TileIconLibrary iconLibrary = null)
         {
             Kind = kind;
             GridX = gridX;
@@ -34,6 +38,23 @@ namespace TileMatch.Presentation
             var rt = (RectTransform)transform;
             rt.anchoredPosition = anchoredPosition;
             rt.sizeDelta = cellSize * 0.92f;
+
+            ApplyIconSprite(iconLibrary);
+        }
+
+        void ApplyIconSprite(TileIconLibrary iconLibrary)
+        {
+            if (icon == null || Kind == TileKind.None) return;
+
+            Sprite sprite = null;
+            if (iconLibrary != null && iconLibrary.TryGetSprite(Kind, out var fromLib))
+                sprite = fromLib;
+            if (sprite == null)
+                sprite = Resources.Load<Sprite>($"{TileIconsResourcesFolder}/{Kind}");
+
+            icon.sprite = sprite;
+            icon.enabled = sprite != null;
+            if (sprite != null) icon.preserveAspect = true;
         }
 
         void OnValidate() => ResolveChildImages();
