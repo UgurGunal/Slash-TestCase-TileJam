@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using LevelData;
 using UnityEngine;
 
@@ -25,6 +26,9 @@ namespace Presentation
         [SerializeField] bool loadOnAwake = true;
 
         public LevelBoardSpec LastSpec { get; private set; }
+
+        PlayableBoardState _playState;
+        readonly Dictionary<(int x, int y, int layer), BoardTileView> _tiles = new Dictionary<(int x, int y, int layer), BoardTileView>();
 
         void Awake()
         {
@@ -101,6 +105,9 @@ namespace Presentation
 
         void Spawn(LevelBoardSpec spec)
         {
+            _tiles.Clear();
+            _playState = new PlayableBoardState(spec);
+
             var layout = ResolveVisualLayout();
             var cell = LevelBoardVisualLayoutSettings.ResolveCellSize(layout);
             var tileScale = LevelBoardVisualLayoutSettings.ResolveTileSizeInCellScale(layout);
@@ -115,6 +122,35 @@ namespace Presentation
                 view.gameObject.name = $"Tile_L{l}_R{y}_C{x}";
                 var pos = GridToAnchored(spec.Width, spec.Height, x, y, cell);
                 view.Bind(kind, x, y, l, pos, cell, tileScale, tileIconLibrary);
+                view.SetClickHandler(OnTileClicked);
+                _tiles[(x, y, l)] = view;
+            }
+
+            RefreshTileClickabilityVisuals();
+        }
+
+        void OnTileClicked(BoardTileView view)
+        {
+            if (_playState == null || view == null) return;
+            var x = view.GridX;
+            var y = view.GridY;
+            var l = view.LayerIndex;
+            if (!TileClickability.IsClickable(_playState, x, y, l)) return;
+
+            _playState.Clear(x, y, l);
+            _tiles.Remove((x, y, l));
+            Destroy(view.gameObject);
+            RefreshTileClickabilityVisuals();
+        }
+
+        void RefreshTileClickabilityVisuals()
+        {
+            if (_playState == null) return;
+            foreach (var kv in _tiles)
+            {
+                var (x, y, l) = kv.Key;
+                var clickable = TileClickability.IsClickable(_playState, x, y, l);
+                kv.Value.SetClickableVisual(clickable);
             }
         }
 

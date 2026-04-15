@@ -1,5 +1,7 @@
+using System;
 using Core;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace Presentation
@@ -10,7 +12,7 @@ namespace Presentation
     /// Icon sprite comes from <see cref="TileIconLibrary"/> or <c>Resources/TileIcons/{TileKind}</c> (e.g. Type0).
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
-    public sealed class BoardTileView : MonoBehaviour
+    public sealed class BoardTileView : MonoBehaviour, IPointerClickHandler
     {
         public const string ChildBackgroundName = "Background";
         public const string ChildIconName = "Icon";
@@ -20,6 +22,12 @@ namespace Presentation
 
         [SerializeField] Image background;
         [SerializeField] Image icon;
+        [Tooltip("Multiplied with background/icon base colors when the tile is not clickable (covered from above).")]
+        [SerializeField] Color blockedTint = new Color(0.55f, 0.55f, 0.55f, 1f);
+
+        Color _baseBackgroundColor = Color.white;
+        Color _baseIconColor = Color.white;
+        Action<BoardTileView> _clicked;
 
         public TileKind Kind { get; private set; }
         public int GridX { get; private set; }
@@ -40,7 +48,31 @@ namespace Presentation
             rt.sizeDelta = cellSize * tileSizeInCellScale;
 
             ApplyIconSprite(iconLibrary);
+
+            if (background != null)
+            {
+                background.raycastTarget = true;
+                _baseBackgroundColor = background.color;
+            }
+
+            if (icon != null)
+            {
+                icon.raycastTarget = false;
+                _baseIconColor = icon.color;
+            }
         }
+
+        public void SetClickHandler(Action<BoardTileView> onClicked) => _clicked = onClicked;
+
+        public void SetClickableVisual(bool clickable)
+        {
+            if (background != null)
+                background.color = clickable ? _baseBackgroundColor : _baseBackgroundColor * blockedTint;
+            if (icon != null)
+                icon.color = clickable ? _baseIconColor : _baseIconColor * blockedTint;
+        }
+
+        public void OnPointerClick(PointerEventData eventData) => _clicked?.Invoke(this);
 
         void ApplyIconSprite(TileIconLibrary iconLibrary)
         {

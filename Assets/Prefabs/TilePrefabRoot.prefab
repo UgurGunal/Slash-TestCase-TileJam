@@ -136,6 +136,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   background: {fileID: 1039909235365944467}
   icon: {fileID: 705823954919890007}
+  blockedTint: {r: 0.735849, g: 0.735849, b: 0.735849, a: 1}
 --- !u!1 &9151997666080493203
 GameObject:
   m_ObjectHideFlags: 0
