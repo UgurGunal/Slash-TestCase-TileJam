@@ -71,11 +71,11 @@ public sealed class TileLevelEditorWindow : EditorWindow
         if (_cells == null) EnsureGrid();
 
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
-        var cell = GUILayout.Width(36);
+        var cell = GUILayout.Width(36f);
         for (var y = _height - 1; y >= 0; y--)
         {
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label($"r{y}", GUILayout.Width(28));
+            GUILayout.Label($"r{y}", GUILayout.Width(28f));
             for (var x = 0; x < _width; x++)
             {
                 var v = _cells[x, y, _currentLayer];

@@ -28,7 +28,7 @@ namespace Presentation
 
         void Awake() => ResolveChildImages();
 
-        public void Bind(TileKind kind, int gridX, int gridY, int layerIndex, Vector2 anchoredPosition, Vector2 cellSize, TileIconLibrary iconLibrary = null)
+        public void Bind(TileKind kind, int gridX, int gridY, int layerIndex, Vector2 anchoredPosition, Vector2 cellSize, float tileSizeInCellScale, TileIconLibrary iconLibrary = null)
         {
             Kind = kind;
             GridX = gridX;
@@ -37,7 +37,7 @@ namespace Presentation
 
             var rt = (RectTransform)transform;
             rt.anchoredPosition = anchoredPosition;
-            rt.sizeDelta = cellSize * 0.92f;
+            rt.sizeDelta = cellSize * tileSizeInCellScale;
 
             ApplyIconSprite(iconLibrary);
         }

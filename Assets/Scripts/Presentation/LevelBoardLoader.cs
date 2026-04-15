@@ -17,11 +17,9 @@ namespace Presentation
         [Tooltip("Optional: 15 sprites (Type0–Type14). Empty slots use Resources/TileIcons/{name}.")]
         [SerializeField] TileIconLibrary tileIconLibrary;
 
-        [Header("Cell size (canvas units)")]
-        [Tooltip("Grid spacing and tile root width. If ≤ 0, falls back to 100.")]
-        [SerializeField] float cellWidth = 100f;
-        [Tooltip("Grid spacing and tile root height. If ≤ 0, falls back to 100.")]
-        [SerializeField] float cellHeight = 100f;
+        [Header("Visual layout")]
+        [Tooltip("Cell sizes and tile padding. If unset, loads Resources/" + LevelBoardVisualLayoutSettings.ResourcesLoadName + " when present, else built-in fallbacks.")]
+        [SerializeField] LevelBoardVisualLayoutSettings visualLayout;
 
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
@@ -103,7 +101,9 @@ namespace Presentation
 
         void Spawn(LevelBoardSpec spec)
         {
-            var cell = ResolveCellSize();
+            var layout = ResolveVisualLayout();
+            var cell = LevelBoardVisualLayoutSettings.ResolveCellSize(layout);
+            var tileScale = LevelBoardVisualLayoutSettings.ResolveTileSizeInCellScale(layout);
             for (var l = 0; l < spec.Depth; l++)
             // UI: later siblings draw on top — spawn bottom row (y = 0) last so it sorts above upper rows.
             for (var y = spec.Height - 1; y >= 0; y--)
@@ -114,16 +114,14 @@ namespace Presentation
                 var view = Instantiate(tilePrefab, boardRoot);
                 view.gameObject.name = $"Tile_L{l}_R{y}_C{x}";
                 var pos = GridToAnchored(spec.Width, spec.Height, x, y, cell);
-                view.Bind(kind, x, y, l, pos, cell, tileIconLibrary);
+                view.Bind(kind, x, y, l, pos, cell, tileScale, tileIconLibrary);
             }
         }
 
-        Vector2 ResolveCellSize()
-        {
-            var w = cellWidth > 0f ? cellWidth : 100f;
-            var h = cellHeight > 0f ? cellHeight : 100f;
-            return new Vector2(w, h);
-        }
+        LevelBoardVisualLayoutSettings ResolveVisualLayout() =>
+            visualLayout != null
+                ? visualLayout
+                : Resources.Load<LevelBoardVisualLayoutSettings>(LevelBoardVisualLayoutSettings.ResourcesLoadName);
 
         static Vector2 GridToAnchored(int width, int height, int x, int y, Vector2 cell)
         {

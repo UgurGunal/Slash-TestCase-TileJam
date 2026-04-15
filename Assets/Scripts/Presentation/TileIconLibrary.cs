@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Presentation
 {
-    [CreateAssetMenu(fileName = "TileIconLibrary", menuName = "Game/Tile Icon Library")]
+    [CreateAssetMenu(fileName = "TileIconLibrary", menuName = "Tile Icon Library")]
     public sealed class TileIconLibrary : ScriptableObject
     {
         [Tooltip("Index 0 = Type0 … index 14 = Type14. Leave empty to use Resources fallback for that type.")]
