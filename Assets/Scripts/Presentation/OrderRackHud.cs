@@ -14,8 +14,8 @@ namespace Presentation
     }
 
     /// <summary>
-    /// Shows each active order’s required icons (left → right) in <see cref="orderStrips"/>; fulfilled steps are dimmed.
-    /// Tiles that match an order’s next icon are consumed there; otherwise they are stored in the rack and shown in <see cref="rackSlotImages"/>.
+    /// Shows each active order’s required icons (left → right) in <see cref="orderStrips"/>; collected icons are dimmed (any order within that strip).
+    /// If a tile matches any still-needed icon on an active order it goes to that order; otherwise it goes to <see cref="rackSlotImages"/>.
     /// </summary>
     public sealed class OrderRackHud : MonoBehaviour
     {
@@ -77,7 +77,7 @@ namespace Presentation
                     var img = cells != null && i < cells.Length ? cells[i] : null;
                     if (img == null) continue;
 
-                    if (!_session.GetActiveSlot(s, out _, out var prog, out var order))
+                    if (!_session.GetActiveSlot(s, out _, out var order, out var fulfilled))
                     {
                         img.enabled = false;
                         continue;
@@ -91,7 +91,8 @@ namespace Presentation
 
                     img.enabled = true;
                     var kind = order.GetIcon(i);
-                    ApplySprite(img, kind, i < prog);
+                    var cellDone = fulfilled != null && i < fulfilled.Length && fulfilled[i];
+                    ApplySprite(img, kind, cellDone);
                 }
             }
 

@@ -13,13 +13,17 @@ namespace Gameplay
         LevelWon,
     }
 
-    /// <summary>Order queue, active slots (<see cref="GameConstants.ActiveOrderSlotsCount"/>), and rack for one level run.</summary>
+    /// <summary>
+    /// Order queue, active slots (<see cref="GameConstants.ActiveOrderSlotsCount"/>), and rack.
+    /// Within each order, required icons may be collected in any order; duplicates use positional slots for UI.
+    /// </summary>
     public sealed class LevelObjectiveSession
     {
         readonly LevelOrdersSpec _orders;
         readonly Queue<int> _pendingOrderIndices = new Queue<int>();
         readonly int[] _slotOrderIndex;
-        readonly int[] _slotProgress;
+        /// <summary>Per display cell: fulfilled for current order in that slot (same length as that order).</summary>
+        readonly bool[][] _slotCellFulfilled;
         readonly TileKind?[] _rack;
         int _rackCount;
         int _completedOrders;
@@ -30,7 +34,7 @@ namespace Gameplay
             _orders = orders ?? throw new ArgumentNullException(nameof(orders));
             var k = GameConstants.ActiveOrderSlotsCount;
             _slotOrderIndex = new int[k];
-            _slotProgress = new int[k];
+            _slotCellFulfilled = new bool[k][];
             _rack = new TileKind?[GameConstants.RackCapacity];
 
             var n = _orders.OrderCount;
@@ -39,12 +43,12 @@ namespace Gameplay
                 if (s < n)
                 {
                     _slotOrderIndex[s] = s;
-                    _slotProgress[s] = 0;
+                    _slotCellFulfilled[s] = new bool[_orders.Orders[s].Length];
                 }
                 else
                 {
                     _slotOrderIndex[s] = -1;
-                    _slotProgress[s] = 0;
+                    _slotCellFulfilled[s] = null;
                 }
             }
 
@@ -69,10 +73,10 @@ namespace Gameplay
             return index < _rackCount ? _rack[index] : null;
         }
 
-        public bool GetActiveSlot(int slot, out int levelOrderIndex, out int fulfilledIcons, out OrderSpec orderSpec)
+        public bool GetActiveSlot(int slot, out int levelOrderIndex, out OrderSpec orderSpec, out bool[] cellsFulfilled)
         {
             orderSpec = null;
-            fulfilledIcons = 0;
+            cellsFulfilled = null;
             levelOrderIndex = -1;
             if ((uint)slot >= (uint)_slotOrderIndex.Length) return false;
 
@@ -80,8 +84,8 @@ namespace Gameplay
             if (oi < 0) return false;
 
             levelOrderIndex = oi;
-            fulfilledIcons = _slotProgress[slot];
             orderSpec = _orders.Orders[oi];
+            cellsFulfilled = _slotCellFulfilled[slot];
             return true;
         }
 
@@ -99,11 +103,30 @@ namespace Gameplay
                 if (oi < 0) continue;
 
                 var order = _orders.Orders[oi];
-                var need = order.GetRequired(_slotProgress[s]);
-                if (need != kind) continue;
+                var fulfilled = _slotCellFulfilled[s];
+                var matchIndex = -1;
+                for (var i = 0; i < order.Length; i++)
+                {
+                    if (fulfilled[i]) continue;
+                    if (order.GetIcon(i) != kind) continue;
+                    matchIndex = i;
+                    break;
+                }
 
-                _slotProgress[s]++;
-                if (_slotProgress[s] >= order.Length)
+                if (matchIndex < 0) continue;
+
+                fulfilled[matchIndex] = true;
+                var allDone = true;
+                for (var j = 0; j < order.Length; j++)
+                {
+                    if (!fulfilled[j])
+                    {
+                        allDone = false;
+                        break;
+                    }
+                }
+
+                if (allDone)
                     return FinishOrderInSlot(s);
 
                 StateChanged?.Invoke();
@@ -125,12 +148,18 @@ namespace Gameplay
         TileCollectResult FinishOrderInSlot(int slot)
         {
             _completedOrders++;
-            _slotProgress[slot] = 0;
 
             if (_pendingOrderIndices.Count > 0)
-                _slotOrderIndex[slot] = _pendingOrderIndices.Dequeue();
+            {
+                var nextOi = _pendingOrderIndices.Dequeue();
+                _slotOrderIndex[slot] = nextOi;
+                _slotCellFulfilled[slot] = new bool[_orders.Orders[nextOi].Length];
+            }
             else
+            {
                 _slotOrderIndex[slot] = -1;
+                _slotCellFulfilled[slot] = null;
+            }
 
             if (_completedOrders >= _orders.OrderCount)
             {

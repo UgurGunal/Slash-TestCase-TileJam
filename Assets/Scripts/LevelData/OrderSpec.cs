@@ -21,7 +21,7 @@ namespace LevelData
 
         public int Length => _icons.Length;
 
-        /// <summary>Which icon is required next given how many icons already delivered (0 .. Length-1).</summary>
+        /// <summary>Sequential rule helper (not used by <see cref="Gameplay.LevelObjectiveSession"/>; orders accept any remaining icon).</summary>
         public TileKind GetRequired(int fulfilledCount) =>
             (uint)fulfilledCount < (uint)_icons.Length ? _icons[fulfilledCount] : TileKind.None;
 
