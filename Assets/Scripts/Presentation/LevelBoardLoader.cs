@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Gameplay;
 using LevelData;
 using UnityEngine;
 
@@ -24,10 +25,14 @@ namespace Presentation
 
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
+        [SerializeField] OrderRackHud orderRackHud;
 
         public LevelBoardSpec LastSpec { get; private set; }
+        public LevelDefinition LastDefinition { get; private set; }
+        public LevelObjectiveSession Session => _session;
 
         PlayableBoardState _playState;
+        LevelObjectiveSession _session;
         readonly Dictionary<(int x, int y, int layer), BoardTileView> _tiles = new Dictionary<(int x, int y, int layer), BoardTileView>();
 
         void Awake()
@@ -56,14 +61,17 @@ namespace Presentation
                 return;
             }
 
-            if (!LevelGridParser.TryParseJson(json, out var spec, out var err))
+            if (!LevelGridParser.TryParseJson(json, out LevelDefinition definition, out var err))
             {
                 Debug.LogError($"[LevelBoardLoader] {err}\nSource: {source}", this);
                 return;
             }
 
-            LastSpec = spec;
-            Debug.Log($"[LevelBoardLoader] Loaded from {source}\n{LevelGridParser.BuildValidationReport(spec)}");
+            LastDefinition = definition;
+            LastSpec = definition.Board;
+            _session = new LevelObjectiveSession(definition.Orders);
+            orderRackHud?.BindSession(_session);
+            Debug.Log($"[LevelBoardLoader] Loaded from {source}\n{LevelGridParser.BuildValidationReport(definition.Board)}");
 
             if (clearExistingChildren)
             {
@@ -71,7 +79,7 @@ namespace Presentation
                     Destroy(boardRoot.GetChild(i).gameObject);
             }
 
-            Spawn(spec);
+            Spawn(definition.Board);
         }
 
         bool TryGetJsonText(out string json, out string sourceLabel)
@@ -131,11 +139,24 @@ namespace Presentation
 
         void OnTileClicked(BoardTileView view)
         {
-            if (_playState == null || view == null) return;
+            if (_playState == null || view == null || _session == null) return;
+            if (_session.HasFailed || _session.HasWon) return;
+
             var x = view.GridX;
             var y = view.GridY;
             var l = view.LayerIndex;
             if (!TileClickability.IsClickable(_playState, x, y, l)) return;
+
+            var result = _session.TryCollectTile(view.Kind);
+            if (result == TileCollectResult.FailedRackFull)
+            {
+                Debug.LogWarning("[LevelBoardLoader] Rack full — level failed.");
+                RefreshTileClickabilityVisuals();
+                return;
+            }
+
+            if (result == TileCollectResult.LevelWon)
+                Debug.Log("[LevelBoardLoader] All orders completed — level won.");
 
             _playState.Clear(x, y, l);
             _tiles.Remove((x, y, l));

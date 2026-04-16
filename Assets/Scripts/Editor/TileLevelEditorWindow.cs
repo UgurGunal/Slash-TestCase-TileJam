@@ -179,7 +179,7 @@ public sealed class TileLevelEditorWindow : EditorWindow
         if (string.IsNullOrEmpty(path)) return;
 
         var json = File.ReadAllText(path);
-        if (!LevelGridParser.TryParseJson(json, out var spec, out var err))
+        if (!LevelGridParser.TryParseJson(json, out LevelBoardSpec spec, out var err))
         {
             EditorUtility.DisplayDialog("Import failed", err, "OK");
             return;
@@ -203,7 +203,7 @@ public sealed class TileLevelEditorWindow : EditorWindow
             return;
         }
 
-        if (!LevelGridParser.TryParseJson(ta.text, out var spec, out var err))
+        if (!LevelGridParser.TryParseJson(ta.text, out LevelBoardSpec spec, out var err))
         {
             EditorUtility.DisplayDialog("Load failed", err, "OK");
             return;

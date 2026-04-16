@@ -21,5 +21,9 @@ namespace LevelData
 
         [JsonProperty("matrix3D")]
         public List<List<List<int>>> Matrix3D { get; set; }
+
+        /// <summary>Each entry is one order: variable-length array of tile kinds 0..14. Lengths may differ per order.</summary>
+        [JsonProperty("orders")]
+        public List<List<int>> Orders { get; set; }
     }
 }

@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 00c8b9cceb0082647a7e0d8b87a55e21, type: 3}
   m_Name: BoardVisual
   m_EditorClassIdentifier: 
-  cellWidth: 100
-  cellHeight: 100
+  cellWidth: 78
+  cellHeight: 84
   tileSizeInCellScale: 1
