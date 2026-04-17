@@ -7,9 +7,20 @@ using UnityEngine.UI;
 
 namespace Presentation
 {
+    /// <summary>How to restore horizontal scroll after order UI is rebuilt (clear + recreate children).</summary>
+    public enum OrderScrollAfterRebuild
+    {
+        /// <summary>Unity default; content rebuild often snaps scroll to the start.</summary>
+        None = 0,
+        /// <summary>Keep the same horizontal normalized position (stay where you were when width unchanged).</summary>
+        PreserveHorizontalNormalized = 1,
+        /// <summary>After layout, jump to the right (newest columns). Applied next frame so Content Size Fitter can run first.</summary>
+        ScrollToRightEnd = 2,
+    }
+
     /// <summary>
-    /// Level editor scene UI: builds 15 palette entries from <see cref="BoardTileView"/> prefab (Type0…Type14),
-    /// and appends clicked kinds to a draft order row. Wire optional UnityEvents for custom tooling.
+    /// Level editor UI: palette picks tile kinds; orders live in one panel — columns left-to-right, tiles top-to-bottom
+    /// per column. The rightmost column is active until <see cref="AddOrderFromDraft"/> starts the next column.
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
@@ -31,56 +42,90 @@ namespace Presentation
         [Tooltip("Nudge all palette tiles from the parent’s upper-left: +X = right, +Y = down (pixels).")]
         [SerializeField] Vector2 paletteTilesPosition;
 
-        [Header("Draft order strip")]
-        [SerializeField] RectTransform draftRow;
-        [SerializeField] Vector2 draftCellSize = new Vector2(72f, 90f);
-        [Tooltip("Uniform scale on each draft tile root (visual size in slot). Slot size is unchanged.")]
-        [SerializeField] [Range(0.05f, 1.5f)] float draftTileScale = 0.92f;
-        [SerializeField] float draftLayoutSpacing = 4f;
-        [Tooltip("Draft icons wrap into lines of at most this many tiles.")]
-        [SerializeField] [Range(1, 32)] int draftMaxTilesPerRow = 8;
-        [Tooltip("Vertical gap between draft lines.")]
-        [SerializeField] float draftRowSpacing = 4f;
-        [Tooltip("Nudge all draft tiles from the parent’s upper-left: +X = right, +Y = down (pixels).")]
-        [SerializeField] Vector2 draftTilesPosition;
+        [Header("Orders (one panel: columns →, tiles ↓)")]
+        [Tooltip("ScrollRect content: horizontal row of order columns. Add Content Size Fitter (horizontal Preferred) here for scroll width.")]
+        [SerializeField] RectTransform orderColumnsPanel;
+        [Tooltip("Optional: parent ScrollRect when many order columns.")]
+        [SerializeField] ScrollRect orderAreaScroll;
+        [Tooltip("Rebuild clears children, which resets scroll until the next layout pass. Deferred restore avoids snapping to the start.")]
+        [SerializeField] OrderScrollAfterRebuild orderScrollAfterRebuild = OrderScrollAfterRebuild.PreserveHorizontalNormalized;
+        [SerializeField] Vector2 orderTileCellSize = new Vector2(72f, 90f);
+        [Tooltip("Uniform scale on each order tile root.")]
+        [SerializeField] [Range(0.05f, 1.5f)] float orderTileScale = 0.92f;
+        [Tooltip("Horizontal gap between order columns.")]
+        [SerializeField] float orderColumnSpacing = 8f;
+        [Tooltip("Vertical gap between tiles inside a column.")]
+        [SerializeField] float orderTileVerticalSpacing = 4f;
+        [Tooltip("Nudge entire order area: +X = right, +Y = down (pixels).")]
+        [SerializeField] Vector2 orderPanelPosition;
+        [Tooltip("Optional: starts the next column (current column must be non-empty).")]
+        [SerializeField] Button addOrderButton;
 
         [Header("Events")]
         [SerializeField] UnityEvent<int> onPaletteTileKindClicked;
         [SerializeField] UnityEvent onDraftChanged;
+        [SerializeField] UnityEvent onFinalizedOrdersChanged;
 
-        readonly List<TileKind> _draft = new List<TileKind>();
+        readonly List<List<TileKind>> _orderColumns = new List<List<TileKind>>();
 
         Object _lastPrefab;
         RectTransform _lastPaletteRow;
-        RectTransform _lastDraftRow;
+        RectTransform _lastOrderPanel;
         Vector2 _lastPaletteCell;
-        Vector2 _lastDraftCell;
-        float _lastPaletteTileInCell;
-        float _lastDraftTileInCell;
+        Vector2 _lastOrderCell;
+        float _lastPaletteTileScale;
+        float _lastOrderTileScale;
         Vector2 _lastPaletteTilesPosition;
-        Vector2 _lastDraftTilesPosition;
+        Vector2 _lastOrderPanelPosition;
         float _lastPaletteSpacing;
-        float _lastDraftSpacing;
+        float _lastOrderColumnSpacing;
+        float _lastOrderTileVSpacing;
         int _lastPaletteMaxPerRow;
-        int _lastDraftMaxPerRow;
         float _lastPaletteRowSpacing;
-        float _lastDraftRowSpacing;
+        Object _lastOrderScroll;
+        OrderScrollAfterRebuild _lastOrderScrollAfterRebuild;
         bool _rebuildQueued = true;
 
-        public IReadOnlyList<TileKind> DraftOrder => _draft;
+        OrderScrollAfterRebuild _pendingScrollMode;
+        float _pendingScrollNormalized;
+        bool _pendingScrollApply;
 
-        void OnEnable() => _rebuildQueued = true;
+        /// <summary>Rightmost column — the one palette clicks append to.</summary>
+        public IReadOnlyList<TileKind> ActiveColumn =>
+            _orderColumns.Count > 0 ? _orderColumns[_orderColumns.Count - 1] : System.Array.Empty<TileKind>();
+
+        /// <summary>Same as active column (legacy name).</summary>
+        public IReadOnlyList<TileKind> DraftOrder => ActiveColumn;
+
+        /// <summary>All columns left-to-right; last entry is the active column.</summary>
+        public IReadOnlyList<List<TileKind>> OrderColumns => _orderColumns;
+
+        /// <summary>Completed columns only (excludes trailing active column).</summary>
+        public IReadOnlyList<IReadOnlyList<TileKind>> FinalizedOrders => new FinalizedColumnsView(_orderColumns);
+
+        void OnEnable()
+        {
+            EnsureAtLeastOneColumn();
+            _rebuildQueued = true;
+            if (addOrderButton != null)
+                addOrderButton.onClick.AddListener(AddOrderFromDraft);
+        }
+
+        void OnDisable()
+        {
+            if (addOrderButton != null)
+                addOrderButton.onClick.RemoveListener(AddOrderFromDraft);
+        }
 
         void OnValidate()
         {
             paletteCellSize = new Vector2(Mathf.Max(1f, paletteCellSize.x), Mathf.Max(1f, paletteCellSize.y));
-            draftCellSize = new Vector2(Mathf.Max(1f, draftCellSize.x), Mathf.Max(1f, draftCellSize.y));
+            orderTileCellSize = new Vector2(Mathf.Max(1f, orderTileCellSize.x), Mathf.Max(1f, orderTileCellSize.y));
             paletteLayoutSpacing = Mathf.Max(0f, paletteLayoutSpacing);
-            draftLayoutSpacing = Mathf.Max(0f, draftLayoutSpacing);
+            orderColumnSpacing = Mathf.Max(0f, orderColumnSpacing);
+            orderTileVerticalSpacing = Mathf.Max(0f, orderTileVerticalSpacing);
             paletteRowSpacing = Mathf.Max(0f, paletteRowSpacing);
-            draftRowSpacing = Mathf.Max(0f, draftRowSpacing);
             paletteMaxTilesPerRow = Mathf.Clamp(paletteMaxTilesPerRow, 1, GameConstants.PlayableTileKindCount);
-            draftMaxTilesPerRow = Mathf.Clamp(draftMaxTilesPerRow, 1, 32);
             _rebuildQueued = true;
         }
 
@@ -98,27 +143,31 @@ namespace Presentation
 
         void RebuildAll(bool force)
         {
-            if (tilePrefab == null || paletteRow == null || draftRow == null)
+            if (tilePrefab == null || paletteRow == null || orderColumnsPanel == null)
                 return;
+
+            EnsureAtLeastOneColumn();
 
             if (!force &&
                 _lastPrefab == tilePrefab &&
                 _lastPaletteRow == paletteRow &&
-                _lastDraftRow == draftRow &&
+                _lastOrderPanel == orderColumnsPanel &&
                 _lastPaletteCell == paletteCellSize &&
-                _lastDraftCell == draftCellSize &&
-                Mathf.Approximately(_lastPaletteTileInCell, paletteTileScale) &&
-                Mathf.Approximately(_lastDraftTileInCell, draftTileScale) &&
+                _lastOrderCell == orderTileCellSize &&
+                Mathf.Approximately(_lastPaletteTileScale, paletteTileScale) &&
+                Mathf.Approximately(_lastOrderTileScale, orderTileScale) &&
                 _lastPaletteTilesPosition == paletteTilesPosition &&
-                _lastDraftTilesPosition == draftTilesPosition &&
+                _lastOrderPanelPosition == orderPanelPosition &&
                 Mathf.Approximately(_lastPaletteSpacing, paletteLayoutSpacing) &&
-                Mathf.Approximately(_lastDraftSpacing, draftLayoutSpacing) &&
+                Mathf.Approximately(_lastOrderColumnSpacing, orderColumnSpacing) &&
+                Mathf.Approximately(_lastOrderTileVSpacing, orderTileVerticalSpacing) &&
                 _lastPaletteMaxPerRow == paletteMaxTilesPerRow &&
-                _lastDraftMaxPerRow == draftMaxTilesPerRow &&
                 Mathf.Approximately(_lastPaletteRowSpacing, paletteRowSpacing) &&
-                Mathf.Approximately(_lastDraftRowSpacing, draftRowSpacing))
+                _lastOrderScroll == orderAreaScroll &&
+                _lastOrderScrollAfterRebuild == orderScrollAfterRebuild)
                 return;
 
+            ConfigureOrderScrollForPanel();
             EnsureVerticalStackLayout(paletteRow, paletteRowSpacing, paletteTilesPosition);
 
             ClearChildren(paletteRow);
@@ -146,106 +195,326 @@ namespace Presentation
                 tile.SetClickHandler(OnPaletteTileClicked);
             }
 
-            RebuildDraftVisuals();
+            RebuildOrderColumnsVisuals();
 
             _lastPrefab = tilePrefab;
             _lastPaletteRow = paletteRow;
-            _lastDraftRow = draftRow;
+            _lastOrderPanel = orderColumnsPanel;
             _lastPaletteCell = paletteCellSize;
-            _lastDraftCell = draftCellSize;
-            _lastPaletteTileInCell = paletteTileScale;
-            _lastDraftTileInCell = draftTileScale;
+            _lastOrderCell = orderTileCellSize;
+            _lastPaletteTileScale = paletteTileScale;
+            _lastOrderTileScale = orderTileScale;
             _lastPaletteTilesPosition = paletteTilesPosition;
-            _lastDraftTilesPosition = draftTilesPosition;
+            _lastOrderPanelPosition = orderPanelPosition;
             _lastPaletteSpacing = paletteLayoutSpacing;
-            _lastDraftSpacing = draftLayoutSpacing;
+            _lastOrderColumnSpacing = orderColumnSpacing;
+            _lastOrderTileVSpacing = orderTileVerticalSpacing;
             _lastPaletteMaxPerRow = paletteMaxTilesPerRow;
-            _lastDraftMaxPerRow = draftMaxTilesPerRow;
             _lastPaletteRowSpacing = paletteRowSpacing;
-            _lastDraftRowSpacing = draftRowSpacing;
+            _lastOrderScroll = orderAreaScroll;
+            _lastOrderScrollAfterRebuild = orderScrollAfterRebuild;
+        }
+
+        void LateUpdate()
+        {
+            if (!_pendingScrollApply)
+                return;
+            _pendingScrollApply = false;
+            if (orderAreaScroll == null || orderAreaScroll.content != orderColumnsPanel)
+                return;
+
+            LayoutRebuilder.ForceRebuildLayoutImmediate(orderColumnsPanel);
+            Canvas.ForceUpdateCanvases();
+
+            if (_pendingScrollMode == OrderScrollAfterRebuild.PreserveHorizontalNormalized)
+                orderAreaScroll.horizontalNormalizedPosition = Mathf.Clamp01(_pendingScrollNormalized);
+            else if (_pendingScrollMode == OrderScrollAfterRebuild.ScrollToRightEnd)
+                orderAreaScroll.horizontalNormalizedPosition = 1f;
+        }
+
+        void EnsureAtLeastOneColumn()
+        {
+            if (_orderColumns.Count == 0)
+                _orderColumns.Add(new List<TileKind>());
         }
 
         void OnPaletteTileClicked(BoardTileView view)
         {
             var kind = view.Kind;
             if (kind == TileKind.None) return;
-            _draft.Add(kind);
+            EnsureAtLeastOneColumn();
+            _orderColumns[_orderColumns.Count - 1].Add(kind);
             onPaletteTileKindClicked?.Invoke((int)kind);
-            RebuildDraftVisuals();
+            RebuildOrderColumnsVisuals();
             onDraftChanged?.Invoke();
         }
 
+        /// <summary>Clears tiles in the active (rightmost) column only.</summary>
         public void ClearDraft()
         {
-            _draft.Clear();
-            RebuildDraftVisuals();
+            EnsureAtLeastOneColumn();
+            _orderColumns[_orderColumns.Count - 1].Clear();
+            RebuildOrderColumnsVisuals();
             onDraftChanged?.Invoke();
         }
 
         public void RemoveLastFromDraft()
         {
-            if (_draft.Count == 0) return;
-            _draft.RemoveAt(_draft.Count - 1);
-            RebuildDraftVisuals();
+            EnsureAtLeastOneColumn();
+            var col = _orderColumns[_orderColumns.Count - 1];
+            if (col.Count == 0) return;
+            col.RemoveAt(col.Count - 1);
+            RebuildOrderColumnsVisuals();
             onDraftChanged?.Invoke();
         }
 
-        /// <summary>Single order in the same shape as the Tile Level Editor window orders text, e.g. <c>{3,3,3}</c>.</summary>
+        /// <summary>If the active column has at least one tile, appends a new empty column to the right.</summary>
+        public void AddOrderFromDraft()
+        {
+            EnsureAtLeastOneColumn();
+            var active = _orderColumns[_orderColumns.Count - 1];
+            if (active.Count == 0) return;
+            _orderColumns.Add(new List<TileKind>());
+            RebuildOrderColumnsVisuals();
+            onDraftChanged?.Invoke();
+            onFinalizedOrdersChanged?.Invoke();
+        }
+
+        /// <summary>Removes all columns and starts one empty active column.</summary>
+        public void ClearFinalizedOrders()
+        {
+            _orderColumns.Clear();
+            _orderColumns.Add(new List<TileKind>());
+            RebuildOrderColumnsVisuals();
+            onFinalizedOrdersChanged?.Invoke();
+            onDraftChanged?.Invoke();
+        }
+
         public string GetDraftAsOrderTextEntry()
         {
-            if (_draft.Count == 0) return "{}";
+            EnsureAtLeastOneColumn();
+            var col = _orderColumns[_orderColumns.Count - 1];
+            if (col.Count == 0) return "{}";
             var sb = new StringBuilder();
             sb.Append('{');
-            for (var i = 0; i < _draft.Count; i++)
+            for (var i = 0; i < col.Count; i++)
             {
                 if (i > 0) sb.Append(',');
-                sb.Append((int)_draft[i]);
+                sb.Append((int)col[i]);
             }
 
             sb.Append('}');
             return sb.ToString();
         }
 
-        void RebuildDraftVisuals()
+        /// <summary>Non-empty columns in Tile Level Editor form, e.g. <c>{{1,2},{3,3,3}}</c>.</summary>
+        public string GetFinalizedOrdersAsEditorText()
         {
-            if (draftRow == null || tilePrefab == null) return;
-            ClearChildren(draftRow);
-            EnsureVerticalStackLayout(draftRow, draftRowSpacing, draftTilesPosition);
-            var draftEffCell = draftCellSize;
-            RectTransform draftLineRt = null;
-            for (var i = 0; i < _draft.Count; i++)
+            var sb = new StringBuilder();
+            var any = false;
+            sb.Append('{');
+            for (var c = 0; c < _orderColumns.Count; c++)
             {
-                if (i % draftMaxTilesPerRow == 0)
-                    draftLineRt = CreateHorizontalLayoutRow(
-                        draftRow,
-                        $"DraftLine_{i / draftMaxTilesPerRow}",
-                        draftLayoutSpacing,
-                        draftEffCell.y);
+                var col = _orderColumns[c];
+                if (col.Count == 0) continue;
+                if (any) sb.Append(',');
+                any = true;
+                sb.Append('{');
+                for (var i = 0; i < col.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append((int)col[i]);
+                }
 
-                var kind = _draft[i];
-                var idx = i;
-                var slot = CreateFixedLayoutSlot(draftLineRt, $"DraftSlot_{i}_{kind}", draftEffCell);
-                var tile = Instantiate(tilePrefab, slot, false);
-                tile.gameObject.name = $"Draft_{i}_{kind}";
-                var tileRt = (RectTransform)tile.transform;
-                PrepareTileRectInSlot(tileRt);
-                StripLayoutElementFrom(tile.gameObject);
-                tile.Bind(kind, i, 0, 0, Vector2.zero, draftEffCell, 1f, iconLibrary);
-                ApplyUniformVisualScale(tileRt, draftTileScale);
-                tile.SetClickableVisual(true);
-                tile.SetClickHandler(_ => RemoveDraftAt(idx));
+                sb.Append('}');
             }
+
+            sb.Append('}');
+            return any ? sb.ToString() : string.Empty;
         }
 
-        void RemoveDraftAt(int index)
+        void RebuildOrderColumnsVisuals()
         {
-            if ((uint)index >= (uint)_draft.Count) return;
-            _draft.RemoveAt(index);
-            RebuildDraftVisuals();
+            if (orderColumnsPanel == null || tilePrefab == null) return;
+            EnsureAtLeastOneColumn();
+
+            var hadScroll = orderAreaScroll != null && orderAreaScroll.content == orderColumnsPanel;
+            var savedNorm = hadScroll ? orderAreaScroll.horizontalNormalizedPosition : 0f;
+
+            ClearChildren(orderColumnsPanel);
+            EnsureHorizontalOrdersLayout(orderColumnsPanel, orderColumnSpacing, orderPanelPosition);
+
+            for (var ci = 0; ci < _orderColumns.Count; ci++)
+            {
+                var kinds = _orderColumns[ci];
+                var colRt = CreateOrderColumn(
+                    orderColumnsPanel,
+                    $"OrderColumn_{ci}",
+                    orderTileVerticalSpacing,
+                    orderTileCellSize.x,
+                    kinds.Count,
+                    orderTileCellSize);
+
+                var isActiveColumn = ci == _orderColumns.Count - 1;
+                for (var ti = 0; ti < kinds.Count; ti++)
+                {
+                    var kind = kinds[ti];
+                    var slot = CreateFixedLayoutSlot(colRt, $"O{ci}_T{ti}_{kind}", orderTileCellSize);
+                    var tile = Instantiate(tilePrefab, slot, false);
+                    tile.gameObject.name = $"Order_{ci}_{ti}_{kind}";
+                    var tileRt = (RectTransform)tile.transform;
+                    PrepareTileRectInSlot(tileRt);
+                    StripLayoutElementFrom(tile.gameObject);
+                    tile.Bind(kind, ti, ci, 0, Vector2.zero, orderTileCellSize, 1f, iconLibrary);
+                    ApplyUniformVisualScale(tileRt, orderTileScale);
+                    tile.SetClickableVisual(true);
+                    if (isActiveColumn)
+                    {
+                        var c = ci;
+                        var t = ti;
+                        tile.SetClickHandler(_ => RemoveTileAt(c, t));
+                    }
+                    else
+                        tile.SetClickHandler(null);
+                }
+            }
+
+            ScheduleOrderScrollRestore(hadScroll, savedNorm);
+        }
+
+        void ScheduleOrderScrollRestore(bool hadScroll, float savedNormalized)
+        {
+            if (!hadScroll || orderScrollAfterRebuild == OrderScrollAfterRebuild.None)
+                return;
+            _pendingScrollMode = orderScrollAfterRebuild;
+            _pendingScrollNormalized = savedNormalized;
+            _pendingScrollApply = true;
+        }
+
+        void ConfigureOrderScrollForPanel()
+        {
+            if (orderColumnsPanel == null || orderAreaScroll == null)
+                return;
+
+            if (orderAreaScroll.content != orderColumnsPanel)
+            {
+                Debug.LogWarning(
+                    $"[{nameof(LevelEditorOrderAuthoringPanel)}] Assign Scroll Rect → Content to the same object as Order Columns Panel so horizontal scroll works.",
+                    this);
+                return;
+            }
+
+            orderAreaScroll.horizontal = true;
+            orderAreaScroll.vertical = false;
+            orderAreaScroll.movementType = ScrollRect.MovementType.Clamped;
+        }
+
+        void RemoveTileAt(int columnIndex, int tileIndex)
+        {
+            if ((uint)columnIndex >= (uint)_orderColumns.Count) return;
+            if (columnIndex != _orderColumns.Count - 1) return;
+            var col = _orderColumns[columnIndex];
+            if ((uint)tileIndex >= (uint)col.Count) return;
+            col.RemoveAt(tileIndex);
+            RebuildOrderColumnsVisuals();
             onDraftChanged?.Invoke();
         }
 
-        /// <summary>Direct child of a <see cref="HorizontalLayoutGroup"/>: fixed footprint so inner tile can be smaller.</summary>
+        static RectTransform CreateOrderColumn(
+            RectTransform horizontalParent,
+            string name,
+            float verticalSpacing,
+            float columnWidth,
+            int tileCount,
+            Vector2 cellSize)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(LayoutElement), typeof(VerticalLayoutGroup));
+            var rt = (RectTransform)go.transform;
+            rt.SetParent(horizontalParent, false);
+            rt.localScale = Vector3.one;
+            var le = go.GetComponent<LayoutElement>();
+            le.preferredWidth = columnWidth;
+            le.minWidth = columnWidth;
+            var colH = tileCount <= 0
+                ? cellSize.y
+                : tileCount * cellSize.y + (tileCount - 1) * verticalSpacing;
+            colH = Mathf.Max(cellSize.y, colH);
+            le.preferredHeight = colH;
+            le.minHeight = colH;
+            var v = go.GetComponent<VerticalLayoutGroup>();
+            v.spacing = verticalSpacing;
+            v.childAlignment = TextAnchor.UpperLeft;
+            v.childControlWidth = false;
+            v.childControlHeight = false;
+            v.childForceExpandWidth = false;
+            v.childForceExpandHeight = false;
+            return rt;
+        }
+
+        static void EnsureHorizontalOrdersLayout(RectTransform row, float columnSpacing, Vector2 paddingPixels)
+        {
+            var oldV = row.GetComponent<VerticalLayoutGroup>();
+            if (oldV != null)
+            {
+                if (Application.isPlaying)
+                    Object.Destroy(oldV);
+                else
+                    Object.DestroyImmediate(oldV);
+            }
+
+            var h = row.GetComponent<HorizontalLayoutGroup>();
+            var addedNew = false;
+            if (h == null)
+            {
+                h = row.gameObject.AddComponent<HorizontalLayoutGroup>();
+                addedNew = true;
+            }
+
+            h.spacing = columnSpacing;
+            h.childAlignment = TextAnchor.UpperLeft;
+            h.padding.left = Mathf.RoundToInt(paddingPixels.x);
+            h.padding.top = Mathf.RoundToInt(paddingPixels.y);
+            h.padding.right = 0;
+            h.padding.bottom = 0;
+
+            // Only set layout driver flags when we create the group so inspector tweaks (e.g. child force expand) stay intact.
+            if (addedNew)
+            {
+                h.childControlWidth = false;
+                h.childControlHeight = false;
+                h.childForceExpandWidth = false;
+                h.childForceExpandHeight = false;
+            }
+        }
+
+        /// <summary>Read-only view of columns <c>[0 .. Count-2]</c> when <c>Count ≥ 2</c>, else empty.</summary>
+        sealed class FinalizedColumnsView : IReadOnlyList<IReadOnlyList<TileKind>>
+        {
+            readonly List<List<TileKind>> _inner;
+
+            public FinalizedColumnsView(List<List<TileKind>> inner) => _inner = inner;
+
+            public int Count
+            {
+                get
+                {
+                    if (_inner.Count < 2) return 0;
+                    return _inner.Count - 1;
+                }
+            }
+
+            public IReadOnlyList<TileKind> this[int index] => _inner[index];
+
+            public IEnumerator<IReadOnlyList<TileKind>> GetEnumerator()
+            {
+                var n = Count;
+                for (var i = 0; i < n; i++)
+                    yield return _inner[i];
+            }
+
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        }
+
         static RectTransform CreateFixedLayoutSlot(RectTransform row, string name, Vector2 slotSize)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(LayoutElement));
@@ -267,10 +536,6 @@ namespace Presentation
             tileRt.localScale = Vector3.one;
         }
 
-        /// <summary>
-        /// Prefabs often use stretch anchors or nested layout where <see cref="BoardTileView.Bind"/> <c>sizeDelta</c> alone
-        /// does not shrink the hierarchy; scaling the root matches the tile-scale slider to the actual on-screen size.
-        /// </summary>
         static void ApplyUniformVisualScale(RectTransform tileRt, float uniformScale)
         {
             var s = Mathf.Max(0.01f, uniformScale);
@@ -287,8 +552,6 @@ namespace Presentation
                 Object.DestroyImmediate(le);
         }
 
-        /// <summary>Parent holds stacked horizontal lines; strips any <see cref="HorizontalLayoutGroup"/> on the same object.</summary>
-        /// <summary><paramref name="contentOffsetPixels"/>: +X → right, +Y → down via <see cref="VerticalLayoutGroup.padding"/>.</summary>
         static void EnsureVerticalStackLayout(RectTransform column, float rowSpacing, Vector2 contentOffsetPixels)
         {
             var oldH = column.GetComponent<HorizontalLayoutGroup>();
