@@ -8,6 +8,7 @@ namespace Presentation
     /// Put this on a RectTransform under a Canvas.
     /// For <c>W</c>×<c>H</c> major cells, draws <c>2W+1</c> vertical and <c>2H+1</c> horizontal lines:
     /// spacing is always <c>cellWidth/2</c> horizontally and <c>cellHeight/2</c> vertically (e.g. 160×200 cells → 80 and 100 between adjacent lines).
+    /// Placement / hover use <see cref="GetPlacementSlotCounts"/>: interior slots (e.g. 2×2 majors → 3×3 placements; 1×1 majors → 3×3).
     /// </summary>
     [ExecuteAlways]
     [RequireComponent(typeof(RectTransform))]
@@ -35,6 +36,68 @@ namespace Presentation
         public float GridCellWidth => cellWidth;
         public float GridCellHeight => cellHeight;
         public float GridLineThickness => lineThickness;
+
+        /// <summary>
+        /// Half-cell placement slots covering the board: interior of the line lattice (e.g. 2×2 majors → 3×3 slots).
+        /// If width or height is 1 major cell, that axis uses 3 slots so a 1×1 board still has 3×3 placements.
+        /// </summary>
+        public static void GetPlacementSlotCounts(int majorWidth, int majorHeight, out int placeW, out int placeH)
+        {
+            placeW = majorWidth <= 1 ? 3 : 2 * majorWidth - 1;
+            placeH = majorHeight <= 1 ? 3 : 2 * majorHeight - 1;
+        }
+
+        public void GetPlacementSlotCounts(out int placeW, out int placeH) =>
+            GetPlacementSlotCounts(width, height, out placeW, out placeH);
+
+        /// <summary>
+        /// Placement centers lie on the same half-cell line lattice as the drawn lines:
+        /// <c>x = -gridW/2 + i·(cw/2)</c>, <c>y = -gridH/2 + j·(ch/2)</c>.
+        /// For <c>majorW &gt; 1</c>, <paramref name="px"/> maps to line index <c>i = px + 1</c> (interior lines <c>1 … 2W−1</c>).
+        /// For <c>majorW == 1</c>, <paramref name="px"/> maps to <c>i = px</c> (lines <c>0 … 2</c>).
+        /// </summary>
+        public static Vector2 PlacementSlotCenterLocal(int px, int py, float gridW, float gridH, int majorW, int majorH)
+        {
+            var cw = gridW / Mathf.Max(1, majorW);
+            var ch = gridH / Mathf.Max(1, majorH);
+            var lineIx = majorW <= 1 ? px : px + 1;
+            var lineIy = majorH <= 1 ? py : py + 1;
+            var x = -gridW * 0.5f + lineIx * (cw * 0.5f);
+            var y = -gridH * 0.5f + lineIy * (ch * 0.5f);
+            return new Vector2(x, y);
+        }
+
+        /// <summary>Maps a point in lines local space to placement indices (same lattice as <see cref="PlacementSlotCenterLocal"/>).</summary>
+        public static void LocalToPlacementIndices(
+            Vector2 localInLines,
+            int majorW,
+            int majorH,
+            float gridW,
+            float gridH,
+            out int px,
+            out int py)
+        {
+            GetPlacementSlotCounts(majorW, majorH, out var placeW, out var placeH);
+            var cw = gridW / Mathf.Max(1, majorW);
+            var ch = gridH / Mathf.Max(1, majorH);
+            var tx = (localInLines.x + gridW * 0.5f) / (cw * 0.5f);
+            var ty = (localInLines.y + gridH * 0.5f) / (ch * 0.5f);
+            var vi = Mathf.RoundToInt(tx);
+            var hj = Mathf.RoundToInt(ty);
+            if (majorW <= 1)
+                vi = Mathf.Clamp(vi, 0, 2);
+            else
+                vi = Mathf.Clamp(vi, 1, 2 * majorW - 1);
+            if (majorH <= 1)
+                hj = Mathf.Clamp(hj, 0, 2);
+            else
+                hj = Mathf.Clamp(hj, 1, 2 * majorH - 1);
+
+            px = majorW <= 1 ? vi : vi - 1;
+            py = majorH <= 1 ? hj : hj - 1;
+            px = Mathf.Clamp(px, 0, placeW - 1);
+            py = Mathf.Clamp(py, 0, placeH - 1);
+        }
 
         /// <summary>Line positions use this rect’s local axes (centered, size = width×cell × height×cell). Parent <see cref="GridRect"/> may be moved on the canvas.</summary>
         public RectTransform LinesContentRect

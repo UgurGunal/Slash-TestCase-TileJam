@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using Core;
@@ -84,7 +85,7 @@ namespace Presentation
         Color _orderContentBaseColor;
         bool _orderContentBaseCaptured;
 
-        Object _lastPrefab;
+        UnityEngine.Object _lastPrefab;
         RectTransform _lastPaletteRow;
         RectTransform _lastOrderPanel;
         Vector2 _lastPaletteCell;
@@ -101,7 +102,7 @@ namespace Presentation
         float _lastOrderTileVSpacing;
         int _lastPaletteMaxPerRow;
         float _lastPaletteRowSpacing;
-        Object _lastOrderScroll;
+        UnityEngine.Object _lastOrderScroll;
         OrderScrollAfterRebuild _lastOrderScrollAfterRebuild;
         bool _lastOrdersAuthoringFinalized;
         bool _rebuildQueued = true;
@@ -125,6 +126,12 @@ namespace Presentation
 
         /// <summary>True after <see cref="FinalizeOrders"/> until <see cref="ClearFinalizedOrders"/> or <see cref="UnlockOrderAuthoring"/>.</summary>
         public bool OrdersAuthoringFinalized => _ordersAuthoringFinalized;
+
+        /// <summary>Invoked with <see cref="onOrdersAuthoringFinalized"/> when orders are locked.</summary>
+        public event Action OnOrdersAuthoringFinalized;
+
+        /// <summary>Invoked when authoring is unlocked or orders are cleared.</summary>
+        public event Action OnOrdersAuthoringUnlocked;
 
         void OnEnable()
         {
@@ -335,6 +342,7 @@ namespace Presentation
             _rebuildQueued = true;
             onFinalizedOrdersChanged?.Invoke();
             onDraftChanged?.Invoke();
+            OnOrdersAuthoringUnlocked?.Invoke();
         }
 
         /// <summary>Locks editing after the user finalizes (same as the Finalize Orders button).</summary>
@@ -344,6 +352,7 @@ namespace Presentation
             _ordersAuthoringFinalized = true;
             _rebuildQueued = true;
             onOrdersAuthoringFinalized?.Invoke();
+            OnOrdersAuthoringFinalized?.Invoke();
         }
 
         /// <summary>Re-enables palette, order tile edits, and action buttons without clearing order data.</summary>
@@ -352,6 +361,46 @@ namespace Presentation
             if (!_ordersAuthoringFinalized) return;
             _ordersAuthoringFinalized = false;
             _rebuildQueued = true;
+            OnOrdersAuthoringUnlocked?.Invoke();
+        }
+
+        /// <summary>Last icon in the rightmost non-empty order column (the tile meant for board placement after finalize).</summary>
+        public bool TryGetLastTileOfLastOrder(out TileKind kind)
+        {
+            kind = TileKind.None;
+            for (var c = _orderColumns.Count - 1; c >= 0; c--)
+            {
+                var col = _orderColumns[c];
+                if (col == null || col.Count == 0) continue;
+                kind = col[col.Count - 1];
+                return kind != TileKind.None;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Removes the last tile from the rightmost non-empty order column (the one just placed on the board).
+        /// Call after each successful grid placement so the new “last” tile becomes the next hand tile.
+        /// </summary>
+        public bool TryConsumeLastTileFromOrdersForPlacement(out TileKind removed)
+        {
+            removed = TileKind.None;
+            for (var c = _orderColumns.Count - 1; c >= 0; c--)
+            {
+                var col = _orderColumns[c];
+                if (col == null || col.Count == 0) continue;
+                removed = col[col.Count - 1];
+                col.RemoveAt(col.Count - 1);
+                while (_orderColumns.Count > 1 && _orderColumns[_orderColumns.Count - 1].Count == 0)
+                    _orderColumns.RemoveAt(_orderColumns.Count - 1);
+                EnsureAtLeastOneColumn();
+                RebuildOrderColumnsVisuals();
+                onDraftChanged?.Invoke();
+                return removed != TileKind.None;
+            }
+
+            return false;
         }
 
         public string GetDraftAsOrderTextEntry()
@@ -561,9 +610,9 @@ namespace Presentation
             if (oldV != null)
             {
                 if (Application.isPlaying)
-                    Object.Destroy(oldV);
+                    UnityEngine.Object.Destroy(oldV);
                 else
-                    Object.DestroyImmediate(oldV);
+                    UnityEngine.Object.DestroyImmediate(oldV);
             }
 
             var h = row.GetComponent<HorizontalLayoutGroup>();
@@ -651,9 +700,9 @@ namespace Presentation
             var le = go.GetComponent<LayoutElement>();
             if (le == null) return;
             if (Application.isPlaying)
-                Object.Destroy(le);
+                UnityEngine.Object.Destroy(le);
             else
-                Object.DestroyImmediate(le);
+                UnityEngine.Object.DestroyImmediate(le);
         }
 
         static void EnsureVerticalStackLayout(RectTransform column, float rowSpacing, Vector2 contentOffsetPixels)
@@ -662,9 +711,9 @@ namespace Presentation
             if (oldH != null)
             {
                 if (Application.isPlaying)
-                    Object.Destroy(oldH);
+                    UnityEngine.Object.Destroy(oldH);
                 else
-                    Object.DestroyImmediate(oldH);
+                    UnityEngine.Object.DestroyImmediate(oldH);
             }
 
             var v = column.GetComponent<VerticalLayoutGroup>();

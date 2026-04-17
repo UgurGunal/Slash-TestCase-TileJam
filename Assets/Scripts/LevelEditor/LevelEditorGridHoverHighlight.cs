@@ -4,16 +4,15 @@ using UnityEngine.UI;
 namespace Presentation
 {
     /// <summary>
-    /// Tints the logical cell under the pointer. Cell size matches <see cref="LevelEditorGridLinesView"/> exactly
-    /// by parenting to <see cref="LevelEditorGridLinesView.HighlightLayerRect"/> (same local space as line geometry).
-    /// If you assign <see cref="highlightRoot"/>, positions are mapped from line space into that rect.
+    /// Highlights a full <b>major cell</b> (<see cref="LevelEditorGridLinesView.GridCellWidth"/> × height) centered on the
+    /// nearest half-cell placement point — (2W−1)×(2H−1) centers on a W×H major grid (see <see cref="LevelEditorGridLinesView.GetPlacementSlotCounts"/>).
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
     public sealed class LevelEditorGridHoverHighlight : MonoBehaviour
     {
         [SerializeField] LevelEditorGridLinesView grid;
-        [Tooltip("Optional parent for overlays. Leave empty to use the grid’s built-in hover layer (same space as lines, exact cell size).")]
+        [Tooltip("Optional parent for overlays. Leave empty to use the grid’s built-in hover layer (major-cell-sized highlight).")]
         [SerializeField] RectTransform highlightRoot;
         [SerializeField] Color highlightColor = new Color(1f, 1f, 1f, 0.22f);
         [SerializeField] Canvas canvasOverride;
@@ -43,15 +42,18 @@ namespace Presentation
                 return;
             }
 
-            var w = grid.GridWidthCells;
-            var h = grid.GridHeightCells;
+            var majorW = grid.GridWidthCells;
+            var majorH = grid.GridHeightCells;
             var cw = grid.GridCellWidth;
             var ch = grid.GridCellHeight;
-            if (w < 1 || h < 1)
+            if (majorW < 1 || majorH < 1)
             {
                 HideHighlight();
                 return;
             }
+
+            var gridW = majorW * cw;
+            var gridH = majorH * ch;
 
             var canvas = canvasOverride != null ? canvasOverride : GetComponentInParent<Canvas>();
             var cam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
@@ -68,33 +70,26 @@ namespace Presentation
                 return;
             }
 
-            var gridW = w * cw;
-            var gridH = h * ch;
-
-            var mx = (localInLines.x + gridW * 0.5f) / cw;
-            var my = (localInLines.y + gridH * 0.5f) / ch;
+            var tx = (localInLines.x + gridW * 0.5f) / gridW;
+            var ty = (localInLines.y + gridH * 0.5f) / gridH;
             const float eps = 1e-4f;
-            if (mx < -eps || my < -eps || mx > w + eps || my > h + eps)
+            if (tx < -eps || ty < -eps || tx > 1f + eps || ty > 1f + eps)
             {
                 HideHighlight();
                 return;
             }
 
-            mx = Mathf.Clamp(mx, 0f, w);
-            my = Mathf.Clamp(my, 0f, h);
+            tx = Mathf.Clamp01(tx);
+            ty = Mathf.Clamp01(ty);
 
-            var cx = Mathf.Clamp(Mathf.FloorToInt(mx), 0, w - 1);
-            var cy = Mathf.Clamp(Mathf.FloorToInt(my), 0, h - 1);
+            LevelEditorGridLinesView.LocalToPlacementIndices(localInLines, majorW, majorH, gridW, gridH, out var px, out var py);
 
             var useLinesLocalAnchors = highlightRoot == null;
-            PlaceCell(linesRt, placeRt, cw, ch, gridW, gridH, cx, cy, useLinesLocalAnchors);
+            PlaceHover(linesRt, placeRt, gridW, gridH, cw, ch, majorW, majorH, px, py, useLinesLocalAnchors);
         }
 
         RectTransform HighlightParent =>
             highlightRoot != null ? highlightRoot : grid != null ? grid.HighlightLayerRect : null;
-
-        static Vector2 CellCenterInLinesSpace(int cx, int cy, float gridW, float gridH, float cw, float ch) =>
-            new Vector2(-gridW * 0.5f + (cx + 0.5f) * cw, -gridH * 0.5f + (cy + 0.5f) * ch);
 
         static Vector2 LinesLocalToParentLocal(RectTransform linesRt, RectTransform targetRt, Vector2 localInLines)
         {
@@ -103,15 +98,17 @@ namespace Presentation
             return new Vector2(inTarget.x, inTarget.y);
         }
 
-        void PlaceCell(
+        void PlaceHover(
             RectTransform linesRt,
             RectTransform placeRt,
-            float cw,
-            float ch,
             float gridW,
             float gridH,
-            int cx,
-            int cy,
+            float majorCellW,
+            float majorCellH,
+            int majorW,
+            int majorH,
+            int px,
+            int py,
             bool useLinesLocalAnchors)
         {
             var img = _highlight;
@@ -119,10 +116,10 @@ namespace Presentation
             if (rt.parent != placeRt)
                 rt.SetParent(placeRt, false);
             rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
-            rt.sizeDelta = new Vector2(cw, ch);
+            rt.sizeDelta = new Vector2(majorCellW, majorCellH);
             rt.localScale = Vector3.one;
             rt.localRotation = Quaternion.identity;
-            var centerLines = CellCenterInLinesSpace(cx, cy, gridW, gridH, cw, ch);
+            var centerLines = LevelEditorGridLinesView.PlacementSlotCenterLocal(px, py, gridW, gridH, majorW, majorH);
             rt.anchoredPosition = useLinesLocalAnchors
                 ? centerLines
                 : LinesLocalToParentLocal(linesRt, placeRt, centerLines);
