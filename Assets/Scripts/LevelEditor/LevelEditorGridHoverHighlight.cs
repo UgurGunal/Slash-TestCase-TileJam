@@ -16,6 +16,8 @@ namespace Presentation
         [SerializeField] RectTransform highlightRoot;
         [SerializeField] Color highlightColor = new Color(1f, 1f, 1f, 0.22f);
         [SerializeField] Canvas canvasOverride;
+        [Tooltip("Nested Canvas sort order so the highlight draws above board tiles (sibling RectTransforms that are later in the hierarchy).")]
+        [SerializeField] int hoverOverlaySortingOrder = 500;
 
         Image _highlight;
         bool _built;
@@ -127,6 +129,7 @@ namespace Presentation
             img.preserveAspect = false;
             img.color = highlightColor;
             img.enabled = true;
+            rt.SetAsLastSibling();
         }
 
         void EnsureHighlight()
@@ -141,6 +144,10 @@ namespace Presentation
             img.sprite = null;
             img.type = Image.Type.Simple;
             img.color = highlightColor;
+            // Board tiles often live on a sibling RectTransform that sorts after the grid; without this, hover draws underneath.
+            var overlayCanvas = go.AddComponent<Canvas>();
+            overlayCanvas.overrideSorting = true;
+            overlayCanvas.sortingOrder = hoverOverlaySortingOrder;
             _highlight = img;
             _built = true;
         }
