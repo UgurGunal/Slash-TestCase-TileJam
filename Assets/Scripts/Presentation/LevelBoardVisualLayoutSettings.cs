@@ -12,8 +12,8 @@ namespace Presentation
         /// <summary>Used when no asset is available at runtime.</summary>
         public static class Fallback
         {
-            public const float DefaultCellWidth = 100f;
-            public const float DefaultCellHeight = 100f;
+            public const float DefaultCellWidth = 160f;
+            public const float DefaultCellHeight = 200f;
             public const float TileSizeInCellScale = 0.92f;
         }
 
