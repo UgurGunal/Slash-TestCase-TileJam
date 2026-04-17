@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Core;
+using LevelData;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace Presentation
 {
@@ -110,6 +110,7 @@ namespace Presentation
             }
 
             PlaceTileAt(px, py, layer, _handKind);
+            RefreshTileClickabilityVisuals();
 
             if (orderPanel == null || !orderPanel.TryConsumeLastTileFromOrdersForPlacement(out _))
             {
@@ -205,9 +206,19 @@ namespace Presentation
             var view = Instantiate(tilePrefab, boardTilesRoot, false);
             view.gameObject.name = $"Place_L{layer}_P{py}_P{px}";
             view.Bind(kind, px, py, layer, pos, cell, boardTileScaleInCell, iconLibrary);
-            view.SetClickableVisual(true);
             view.SetClickHandler(null);
             _tileViews[(px, py, layer)] = view;
+        }
+
+        void RefreshTileClickabilityVisuals()
+        {
+            if (_cells == null) return;
+            foreach (var kv in _tileViews)
+            {
+                var (x, y, l) = kv.Key;
+                var clickable = TileClickability.IsClickable(_cells, x, y, l);
+                kv.Value.SetClickableVisual(clickable);
+            }
         }
 
         void RebuildHandVisual()
