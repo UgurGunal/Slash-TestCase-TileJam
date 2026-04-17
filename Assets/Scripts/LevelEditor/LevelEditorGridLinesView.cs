@@ -6,7 +6,8 @@ namespace Presentation
     /// <summary>
     /// Canvas-space grid for authoring: updates UI line images when width/height changes.
     /// Put this on a RectTransform under a Canvas.
-    /// For <c>W</c>×<c>H</c> cells, draws <c>2W−1</c> vertical and <c>2H−1</c> horizontal lines (extra line between each pair of major cell edges).
+    /// For <c>W</c>×<c>H</c> major cells, draws <c>2W+1</c> vertical and <c>2H+1</c> horizontal lines:
+    /// spacing is always <c>cellWidth/2</c> horizontally and <c>cellHeight/2</c> vertically (e.g. 160×200 cells → 80 and 100 between adjacent lines).
     /// </summary>
     [ExecuteAlways]
     [RequireComponent(typeof(RectTransform))]
@@ -17,15 +18,45 @@ namespace Presentation
         [SerializeField] int height = 10;
 
         [Header("Canvas grid visual")]
-        [SerializeField] float cellWidth = 160f;
-        [SerializeField] float cellHeight = 200f;
+        [SerializeField] float cellWidth = 80f;
+        [SerializeField] float cellHeight = 100f;
         [SerializeField] float lineThickness = 2f;
         [SerializeField] Color lineColor = new Color(0.2f, 1f, 0.2f, 1f);
         [SerializeField] bool fitRectToGrid = true;
 
         const string RootName = "__CanvasGridLinesRoot";
+        const string HoverLayerName = "__GridHoverLayer";
         RectTransform _selfRect;
         RectTransform _linesRoot;
+        RectTransform _hoverLayerRoot;
+
+        public int GridWidthCells => width;
+        public int GridHeightCells => height;
+        public float GridCellWidth => cellWidth;
+        public float GridCellHeight => cellHeight;
+        public float GridLineThickness => lineThickness;
+
+        /// <summary>Line positions use this rect’s local axes (centered, size = width×cell × height×cell). Parent <see cref="GridRect"/> may be moved on the canvas.</summary>
+        public RectTransform LinesContentRect
+        {
+            get
+            {
+                EnsureRoot();
+                return _linesRoot;
+            }
+        }
+
+        public RectTransform GridRect => (RectTransform)transform;
+
+        /// <summary>Parent for hover tint rects: same local space as line geometry, never cleared by <see cref="RebuildCanvasGrid"/>.</summary>
+        public RectTransform HighlightLayerRect
+        {
+            get
+            {
+                EnsureRoot();
+                return _hoverLayerRoot;
+            }
+        }
 
         int _lastWidth;
         int _lastHeight;
@@ -63,8 +94,8 @@ namespace Presentation
         {
             width = 10;
             height = 10;
-            cellWidth = 160f;
-            cellHeight = 200f;
+            cellWidth = 80f;
+            cellHeight = 100f;
             lineThickness = 2f;
             fitRectToGrid = true;
         }
@@ -128,38 +159,41 @@ namespace Presentation
 
             _linesRoot.sizeDelta = new Vector2(gridW, gridH);
 
-            var verticalCount = SubdividedLineCount(width);
-            var horizontalCount = SubdividedLineCount(height);
+            var halfCellW = cellWidth * 0.5f;
+            var halfCellH = cellHeight * 0.5f;
 
+            var verticalCount = 2 * width + 1;
             for (var i = 0; i < verticalCount; i++)
             {
-                var fx = -gridW * 0.5f + EdgeToEdgeT(i, verticalCount) * gridW;
+                var fx = -gridW * 0.5f + i * halfCellW;
                 CreateVerticalLine($"XV{i}", fx, gridH);
             }
 
-            for (var i = 0; i < horizontalCount; i++)
+            var horizontalCount = 2 * height + 1;
+            for (var j = 0; j < horizontalCount; j++)
             {
-                var fy = -gridH * 0.5f + EdgeToEdgeT(i, horizontalCount) * gridH;
-                CreateHorizontalLine($"YH{i}", fy, gridW);
+                var fy = -gridH * 0.5f + j * halfCellH;
+                CreateHorizontalLine($"YH{j}", fy, gridW);
             }
+
+            if (_hoverLayerRoot)
+                _hoverLayerRoot.SetAsLastSibling();
         }
-
-        /// <summary><c>N</c> cells → <c>2N−1</c> lines (e.g. 5 → 9). Minimum 2 (both edges).</summary>
-        static int SubdividedLineCount(int cellCount) =>
-            Mathf.Max(2, 2 * Mathf.Max(1, cellCount) - 1);
-
-        /// <summary><c>t</c> in <c>[0,1]</c> from first line through last, evenly spaced.</summary>
-        static float EdgeToEdgeT(int index, int lineCount) =>
-            lineCount <= 1 ? 0f : index / (float)(lineCount - 1);
 
         void EnsureRoot()
         {
             _selfRect = (RectTransform)transform;
-            if (_linesRoot != null) return;
+            if (_linesRoot != null)
+            {
+                EnsureHoverLayerUnderLinesRoot();
+                return;
+            }
+
             var existing = transform.Find(RootName);
             if (existing != null)
             {
                 _linesRoot = (RectTransform)existing;
+                EnsureHoverLayerUnderLinesRoot();
                 return;
             }
 
@@ -172,6 +206,30 @@ namespace Presentation
             rt.anchoredPosition = Vector2.zero;
             rt.localScale = Vector3.one;
             _linesRoot = rt;
+            EnsureHoverLayerUnderLinesRoot();
+        }
+
+        void EnsureHoverLayerUnderLinesRoot()
+        {
+            if (_linesRoot == null) return;
+            if (_hoverLayerRoot && _hoverLayerRoot.parent == _linesRoot)
+                return;
+
+            var found = _linesRoot.Find(HoverLayerName);
+            if (found != null)
+            {
+                _hoverLayerRoot = (RectTransform)found;
+                return;
+            }
+
+            var go = new GameObject(HoverLayerName, typeof(RectTransform));
+            var h = (RectTransform)go.transform;
+            h.SetParent(_linesRoot, false);
+            h.anchorMin = h.anchorMax = h.pivot = new Vector2(0.5f, 0.5f);
+            h.anchoredPosition = Vector2.zero;
+            h.sizeDelta = Vector2.zero;
+            h.localScale = Vector3.one;
+            _hoverLayerRoot = h;
         }
 
         void ClearRoot()
@@ -179,11 +237,14 @@ namespace Presentation
             if (_linesRoot == null) return;
             for (var i = _linesRoot.childCount - 1; i >= 0; i--)
             {
-                var child = _linesRoot.GetChild(i).gameObject;
+                var child = _linesRoot.GetChild(i);
+                if (_hoverLayerRoot && child == _hoverLayerRoot)
+                    continue;
+                var go = child.gameObject;
                 if (Application.isPlaying)
-                    Destroy(child);
+                    Destroy(go);
                 else
-                    DestroyImmediate(child);
+                    DestroyImmediate(go);
             }
         }
 
