@@ -56,17 +56,33 @@ namespace Presentation
         [SerializeField] float orderColumnSpacing = 8f;
         [Tooltip("Vertical gap between tiles inside a column.")]
         [SerializeField] float orderTileVerticalSpacing = 4f;
-        [Tooltip("Nudge entire order area: +X = right, +Y = down (pixels).")]
-        [SerializeField] Vector2 orderPanelPosition;
+        [Header("Order columns panel padding")]
+        [Tooltip("Applied every rebuild to the Order Columns Panel’s Horizontal Layout Group. Set here only (values are pushed from this script each rebuild).")]
+        [SerializeField] int orderAreaHLayoutPadLeft = 10;
+        [SerializeField] int orderAreaHLayoutPadRight;
+        [SerializeField] int orderAreaHLayoutPadTop = 20;
+        [SerializeField] int orderAreaHLayoutPadBottom;
         [Tooltip("Optional: starts the next column (current column must be non-empty).")]
         [SerializeField] Button addOrderButton;
+        [Tooltip("Locks order editing: palette and order tiles stop accepting clicks; Add Order / Finalize are disabled.")]
+        [SerializeField] Button finalizeOrdersButton;
+        [Header("Finalize visuals")]
+        [Tooltip("If unset, uses a Graphic on Order Columns Panel. Tint when orders are finalized.")]
+        [SerializeField] Graphic orderContentColorTarget;
+        [SerializeField] Color orderContentFinalizedTint = new Color(0.9f, 0.92f, 0.98f, 1f);
 
         [Header("Events")]
         [SerializeField] UnityEvent<int> onPaletteTileKindClicked;
         [SerializeField] UnityEvent onDraftChanged;
         [SerializeField] UnityEvent onFinalizedOrdersChanged;
+        [Tooltip("Invoked when Finalize Orders is used and editing is locked.")]
+        [SerializeField] UnityEvent onOrdersAuthoringFinalized;
 
         readonly List<List<TileKind>> _orderColumns = new List<List<TileKind>>();
+
+        bool _ordersAuthoringFinalized;
+        Color _orderContentBaseColor;
+        bool _orderContentBaseCaptured;
 
         Object _lastPrefab;
         RectTransform _lastPaletteRow;
@@ -76,7 +92,10 @@ namespace Presentation
         float _lastPaletteTileScale;
         float _lastOrderTileScale;
         Vector2 _lastPaletteTilesPosition;
-        Vector2 _lastOrderPanelPosition;
+        int _lastOrderPadL;
+        int _lastOrderPadR;
+        int _lastOrderPadT;
+        int _lastOrderPadB;
         float _lastPaletteSpacing;
         float _lastOrderColumnSpacing;
         float _lastOrderTileVSpacing;
@@ -84,6 +103,7 @@ namespace Presentation
         float _lastPaletteRowSpacing;
         Object _lastOrderScroll;
         OrderScrollAfterRebuild _lastOrderScrollAfterRebuild;
+        bool _lastOrdersAuthoringFinalized;
         bool _rebuildQueued = true;
 
         OrderScrollAfterRebuild _pendingScrollMode;
@@ -103,18 +123,25 @@ namespace Presentation
         /// <summary>Completed columns only (excludes trailing active column).</summary>
         public IReadOnlyList<IReadOnlyList<TileKind>> FinalizedOrders => new FinalizedColumnsView(_orderColumns);
 
+        /// <summary>True after <see cref="FinalizeOrders"/> until <see cref="ClearFinalizedOrders"/> or <see cref="UnlockOrderAuthoring"/>.</summary>
+        public bool OrdersAuthoringFinalized => _ordersAuthoringFinalized;
+
         void OnEnable()
         {
             EnsureAtLeastOneColumn();
             _rebuildQueued = true;
             if (addOrderButton != null)
                 addOrderButton.onClick.AddListener(AddOrderFromDraft);
+            if (finalizeOrdersButton != null)
+                finalizeOrdersButton.onClick.AddListener(FinalizeOrders);
         }
 
         void OnDisable()
         {
             if (addOrderButton != null)
                 addOrderButton.onClick.RemoveListener(AddOrderFromDraft);
+            if (finalizeOrdersButton != null)
+                finalizeOrdersButton.onClick.RemoveListener(FinalizeOrders);
         }
 
         void OnValidate()
@@ -124,6 +151,10 @@ namespace Presentation
             paletteLayoutSpacing = Mathf.Max(0f, paletteLayoutSpacing);
             orderColumnSpacing = Mathf.Max(0f, orderColumnSpacing);
             orderTileVerticalSpacing = Mathf.Max(0f, orderTileVerticalSpacing);
+            orderAreaHLayoutPadLeft = Mathf.Max(0, orderAreaHLayoutPadLeft);
+            orderAreaHLayoutPadRight = Mathf.Max(0, orderAreaHLayoutPadRight);
+            orderAreaHLayoutPadTop = Mathf.Max(0, orderAreaHLayoutPadTop);
+            orderAreaHLayoutPadBottom = Mathf.Max(0, orderAreaHLayoutPadBottom);
             paletteRowSpacing = Mathf.Max(0f, paletteRowSpacing);
             paletteMaxTilesPerRow = Mathf.Clamp(paletteMaxTilesPerRow, 1, GameConstants.PlayableTileKindCount);
             _rebuildQueued = true;
@@ -157,14 +188,18 @@ namespace Presentation
                 Mathf.Approximately(_lastPaletteTileScale, paletteTileScale) &&
                 Mathf.Approximately(_lastOrderTileScale, orderTileScale) &&
                 _lastPaletteTilesPosition == paletteTilesPosition &&
-                _lastOrderPanelPosition == orderPanelPosition &&
+                _lastOrderPadL == orderAreaHLayoutPadLeft &&
+                _lastOrderPadR == orderAreaHLayoutPadRight &&
+                _lastOrderPadT == orderAreaHLayoutPadTop &&
+                _lastOrderPadB == orderAreaHLayoutPadBottom &&
                 Mathf.Approximately(_lastPaletteSpacing, paletteLayoutSpacing) &&
                 Mathf.Approximately(_lastOrderColumnSpacing, orderColumnSpacing) &&
                 Mathf.Approximately(_lastOrderTileVSpacing, orderTileVerticalSpacing) &&
                 _lastPaletteMaxPerRow == paletteMaxTilesPerRow &&
                 Mathf.Approximately(_lastPaletteRowSpacing, paletteRowSpacing) &&
                 _lastOrderScroll == orderAreaScroll &&
-                _lastOrderScrollAfterRebuild == orderScrollAfterRebuild)
+                _lastOrderScrollAfterRebuild == orderScrollAfterRebuild &&
+                _lastOrdersAuthoringFinalized == _ordersAuthoringFinalized)
                 return;
 
             ConfigureOrderScrollForPanel();
@@ -191,11 +226,14 @@ namespace Presentation
                 StripLayoutElementFrom(tile.gameObject);
                 tile.Bind(kind, i, 0, 0, Vector2.zero, paletteEffCell, 1f, iconLibrary);
                 ApplyUniformVisualScale(tileRt, paletteTileScale);
-                tile.SetClickableVisual(true);
-                tile.SetClickHandler(OnPaletteTileClicked);
+                var paletteInteractive = !_ordersAuthoringFinalized;
+                tile.SetClickableVisual(paletteInteractive);
+                tile.SetClickHandler(paletteInteractive ? OnPaletteTileClicked : null);
             }
 
             RebuildOrderColumnsVisuals();
+            ApplyOrderContentVisual();
+            RefreshOrderActionButtons();
 
             _lastPrefab = tilePrefab;
             _lastPaletteRow = paletteRow;
@@ -205,7 +243,10 @@ namespace Presentation
             _lastPaletteTileScale = paletteTileScale;
             _lastOrderTileScale = orderTileScale;
             _lastPaletteTilesPosition = paletteTilesPosition;
-            _lastOrderPanelPosition = orderPanelPosition;
+            _lastOrderPadL = orderAreaHLayoutPadLeft;
+            _lastOrderPadR = orderAreaHLayoutPadRight;
+            _lastOrderPadT = orderAreaHLayoutPadTop;
+            _lastOrderPadB = orderAreaHLayoutPadBottom;
             _lastPaletteSpacing = paletteLayoutSpacing;
             _lastOrderColumnSpacing = orderColumnSpacing;
             _lastOrderTileVSpacing = orderTileVerticalSpacing;
@@ -213,6 +254,7 @@ namespace Presentation
             _lastPaletteRowSpacing = paletteRowSpacing;
             _lastOrderScroll = orderAreaScroll;
             _lastOrderScrollAfterRebuild = orderScrollAfterRebuild;
+            _lastOrdersAuthoringFinalized = _ordersAuthoringFinalized;
         }
 
         void LateUpdate()
@@ -240,6 +282,7 @@ namespace Presentation
 
         void OnPaletteTileClicked(BoardTileView view)
         {
+            if (_ordersAuthoringFinalized) return;
             var kind = view.Kind;
             if (kind == TileKind.None) return;
             EnsureAtLeastOneColumn();
@@ -252,6 +295,7 @@ namespace Presentation
         /// <summary>Clears tiles in the active (rightmost) column only.</summary>
         public void ClearDraft()
         {
+            if (_ordersAuthoringFinalized) return;
             EnsureAtLeastOneColumn();
             _orderColumns[_orderColumns.Count - 1].Clear();
             RebuildOrderColumnsVisuals();
@@ -260,6 +304,7 @@ namespace Presentation
 
         public void RemoveLastFromDraft()
         {
+            if (_ordersAuthoringFinalized) return;
             EnsureAtLeastOneColumn();
             var col = _orderColumns[_orderColumns.Count - 1];
             if (col.Count == 0) return;
@@ -271,6 +316,7 @@ namespace Presentation
         /// <summary>If the active column has at least one tile, appends a new empty column to the right.</summary>
         public void AddOrderFromDraft()
         {
+            if (_ordersAuthoringFinalized) return;
             EnsureAtLeastOneColumn();
             var active = _orderColumns[_orderColumns.Count - 1];
             if (active.Count == 0) return;
@@ -283,11 +329,29 @@ namespace Presentation
         /// <summary>Removes all columns and starts one empty active column.</summary>
         public void ClearFinalizedOrders()
         {
+            _ordersAuthoringFinalized = false;
             _orderColumns.Clear();
             _orderColumns.Add(new List<TileKind>());
-            RebuildOrderColumnsVisuals();
+            _rebuildQueued = true;
             onFinalizedOrdersChanged?.Invoke();
             onDraftChanged?.Invoke();
+        }
+
+        /// <summary>Locks editing after the user finalizes (same as the Finalize Orders button).</summary>
+        public void FinalizeOrders()
+        {
+            if (_ordersAuthoringFinalized) return;
+            _ordersAuthoringFinalized = true;
+            _rebuildQueued = true;
+            onOrdersAuthoringFinalized?.Invoke();
+        }
+
+        /// <summary>Re-enables palette, order tile edits, and action buttons without clearing order data.</summary>
+        public void UnlockOrderAuthoring()
+        {
+            if (!_ordersAuthoringFinalized) return;
+            _ordersAuthoringFinalized = false;
+            _rebuildQueued = true;
         }
 
         public string GetDraftAsOrderTextEntry()
@@ -342,7 +406,13 @@ namespace Presentation
             var savedNorm = hadScroll ? orderAreaScroll.horizontalNormalizedPosition : 0f;
 
             ClearChildren(orderColumnsPanel);
-            EnsureHorizontalOrdersLayout(orderColumnsPanel, orderColumnSpacing, orderPanelPosition);
+            EnsureHorizontalOrdersLayout(
+                orderColumnsPanel,
+                orderColumnSpacing,
+                orderAreaHLayoutPadLeft,
+                orderAreaHLayoutPadRight,
+                orderAreaHLayoutPadTop,
+                orderAreaHLayoutPadBottom);
 
             for (var ci = 0; ci < _orderColumns.Count; ci++)
             {
@@ -367,8 +437,9 @@ namespace Presentation
                     StripLayoutElementFrom(tile.gameObject);
                     tile.Bind(kind, ti, ci, 0, Vector2.zero, orderTileCellSize, 1f, iconLibrary);
                     ApplyUniformVisualScale(tileRt, orderTileScale);
+                    var orderEditable = !_ordersAuthoringFinalized;
                     tile.SetClickableVisual(true);
-                    if (isActiveColumn)
+                    if (orderEditable && isActiveColumn)
                     {
                         var c = ci;
                         var t = ti;
@@ -380,6 +451,32 @@ namespace Presentation
             }
 
             ScheduleOrderScrollRestore(hadScroll, savedNorm);
+        }
+
+        void ApplyOrderContentVisual()
+        {
+            var g = orderContentColorTarget != null
+                ? orderContentColorTarget
+                : orderColumnsPanel != null
+                    ? orderColumnsPanel.GetComponent<Graphic>()
+                    : null;
+            if (g == null) return;
+            if (!_orderContentBaseCaptured)
+            {
+                _orderContentBaseColor = g.color;
+                _orderContentBaseCaptured = true;
+            }
+
+            g.color = _ordersAuthoringFinalized ? orderContentFinalizedTint : _orderContentBaseColor;
+        }
+
+        void RefreshOrderActionButtons()
+        {
+            var allow = !_ordersAuthoringFinalized;
+            if (addOrderButton != null)
+                addOrderButton.interactable = allow;
+            if (finalizeOrdersButton != null)
+                finalizeOrdersButton.interactable = allow;
         }
 
         void ScheduleOrderScrollRestore(bool hadScroll, float savedNormalized)
@@ -411,6 +508,7 @@ namespace Presentation
 
         void RemoveTileAt(int columnIndex, int tileIndex)
         {
+            if (_ordersAuthoringFinalized) return;
             if ((uint)columnIndex >= (uint)_orderColumns.Count) return;
             if (columnIndex != _orderColumns.Count - 1) return;
             var col = _orderColumns[columnIndex];
@@ -451,7 +549,13 @@ namespace Presentation
             return rt;
         }
 
-        static void EnsureHorizontalOrdersLayout(RectTransform row, float columnSpacing, Vector2 paddingPixels)
+        static void EnsureHorizontalOrdersLayout(
+            RectTransform row,
+            float columnSpacing,
+            int padLeft,
+            int padRight,
+            int padTop,
+            int padBottom)
         {
             var oldV = row.GetComponent<VerticalLayoutGroup>();
             if (oldV != null)
@@ -472,10 +576,10 @@ namespace Presentation
 
             h.spacing = columnSpacing;
             h.childAlignment = TextAnchor.UpperLeft;
-            h.padding.left = Mathf.RoundToInt(paddingPixels.x);
-            h.padding.top = Mathf.RoundToInt(paddingPixels.y);
-            h.padding.right = 0;
-            h.padding.bottom = 0;
+            h.padding.left = padLeft;
+            h.padding.right = padRight;
+            h.padding.top = padTop;
+            h.padding.bottom = padBottom;
 
             // Only set layout driver flags when we create the group so inspector tweaks (e.g. child force expand) stay intact.
             if (addedNew)
