@@ -545,7 +545,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   levelJson: {fileID: 0}
-  resourcesLevelPath: Levels/level_2
+  resourcesLevelPath: Levels/level_10
   boardRoot: {fileID: 346736263}
   tilePrefab: {fileID: 4487092798841758540, guid: 1a61fa5e0d510a6449e07a73c79d2ada, type: 3}
   tileIconLibrary: {fileID: 11400000, guid: 0b7a8f23691c94743b398b26c9d2ada5, type: 2}

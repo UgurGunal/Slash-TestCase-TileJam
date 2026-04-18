@@ -26,6 +26,8 @@ namespace Presentation
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
         [SerializeField] OrderRackHud orderRackHud;
+        [Tooltip("Log each tile click: order match vs rack, strip indices, and automatic rack→order matches.")]
+        [SerializeField] bool logTileCollectFlow;
 
         public LevelBoardSpec LastSpec { get; private set; }
         public LevelDefinition LastDefinition { get; private set; }
@@ -34,6 +36,7 @@ namespace Presentation
         PlayableBoardState _playState;
         LevelObjectiveSession _session;
         readonly Dictionary<(int x, int y, int layer), BoardTileView> _tiles = new Dictionary<(int x, int y, int layer), BoardTileView>();
+        bool _tileCollectInFlight;
 
         void Awake()
         {
@@ -69,7 +72,7 @@ namespace Presentation
 
             LastDefinition = definition;
             LastSpec = definition.Board;
-            _session = new LevelObjectiveSession(definition.Orders);
+            _session = new LevelObjectiveSession(definition.Orders) { LogCollectFlow = logTileCollectFlow };
             orderRackHud?.BindSession(_session);
             Debug.Log($"[LevelBoardLoader] Loaded from {source}\n{LevelGridParser.BuildValidationReport(definition.Board)}");
 
@@ -139,6 +142,7 @@ namespace Presentation
 
         void OnTileClicked(BoardTileView view)
         {
+            if (_tileCollectInFlight) return;
             if (_playState == null || view == null || _session == null) return;
             if (_session.HasFailed || _session.HasWon) return;
 
@@ -147,21 +151,35 @@ namespace Presentation
             var l = view.LayerIndex;
             if (!TileClickability.IsClickable(_playState, x, y, l)) return;
 
-            var result = _session.TryCollectTile(view.Kind);
-            if (result == TileCollectResult.FailedRackFull)
+            _tileCollectInFlight = true;
+            try
             {
-                Debug.LogWarning("[LevelBoardLoader] Rack full — level failed.");
+                var result = _session.TryCollectTile(view.Kind);
+                if (result == TileCollectResult.SessionInactive)
+                {
+                    RefreshTileClickabilityVisuals();
+                    return;
+                }
+
+                if (result == TileCollectResult.FailedRackFull)
+                {
+                    Debug.LogWarning("[LevelBoardLoader] Rack full — level failed.");
+                    RefreshTileClickabilityVisuals();
+                    return;
+                }
+
+                if (result == TileCollectResult.LevelWon)
+                    Debug.Log("[LevelBoardLoader] All orders completed — level won.");
+
+                _playState.Clear(x, y, l);
+                _tiles.Remove((x, y, l));
+                Destroy(view.gameObject);
                 RefreshTileClickabilityVisuals();
-                return;
             }
-
-            if (result == TileCollectResult.LevelWon)
-                Debug.Log("[LevelBoardLoader] All orders completed — level won.");
-
-            _playState.Clear(x, y, l);
-            _tiles.Remove((x, y, l));
-            Destroy(view.gameObject);
-            RefreshTileClickabilityVisuals();
+            finally
+            {
+                _tileCollectInFlight = false;
+            }
         }
 
         void RefreshTileClickabilityVisuals()

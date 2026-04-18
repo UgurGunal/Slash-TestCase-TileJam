@@ -5,11 +5,8 @@ namespace Core
     {
         public const int RackCapacity = 6;
 
-        /// <summary>
-        /// How many order strips are active at once. This build uses 3 (each strip shows one order’s icons).
-        /// For other layouts (2 / 4 / 5 strips), change this or use a separate build/prefab that expects a different count.
-        /// </summary>
-        public const int ActiveOrderSlotsCount = 3;
+        /// <summary>Default: 2 parallel customers (two HUD order strips). Increase for 3+ strips.</summary>
+        public const int ActiveOrderSlotsCount = 2;
 
         /// <summary>Playable icon types (<see cref="TileKind.Type0"/> … <see cref="TileKind.Type14"/>), excluding <see cref="TileKind.None"/>.</summary>
         public const int PlayableTileKindCount = 15;

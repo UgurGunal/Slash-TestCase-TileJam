@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Core;
 using LevelData;
+using UnityEngine;
 
 namespace Gameplay
 {
@@ -11,6 +12,8 @@ namespace Gameplay
         AddedToRack,
         FailedRackFull,
         LevelWon,
+        /// <summary>Level already won or lost — tile was not collected; board tile must stay.</summary>
+        SessionInactive,
     }
 
     /// <summary>
@@ -28,6 +31,9 @@ namespace Gameplay
         int _rackCount;
         int _completedOrders;
         bool _failed;
+
+        /// <summary>When true, <see cref="TryCollectTile"/> logs each step (board match, rack, auto rack drain). Enable on <c>LevelBoardLoader.logTileCollectFlow</c>.</summary>
+        public bool LogCollectFlow { get; set; }
 
         public LevelObjectiveSession(LevelOrdersSpec orders)
         {
@@ -94,8 +100,70 @@ namespace Gameplay
 
         public TileCollectResult TryCollectTile(TileKind kind)
         {
+            if (LogCollectFlow)
+                Debug.Log($"[TileCollect] Click {kind} — start (rack before: {_rackCount} tile(s)).");
+
             if (_failed || HasWon)
+            {
+                if (LogCollectFlow)
+                    Debug.Log($"[TileCollect] Click {kind} — ignored: session already {(HasWon ? "won" : "failed (rack full)")}.");
+                return TileCollectResult.SessionInactive;
+            }
+
+            if (!TryApplyKindToActiveOrders(kind, CollectApplySource.FromBoardClick, out var applyResult, out var completedWholeOrder))
+            {
+                if (_rackCount >= GameConstants.RackCapacity)
+                {
+                    _failed = true;
+                    StateChanged?.Invoke();
+                    if (LogCollectFlow)
+                        Debug.Log($"[TileCollect] Click {kind} — no matching order; rack full → level failed.");
+                    return TileCollectResult.FailedRackFull;
+                }
+
+                _rack[_rackCount++] = kind;
+                StateChanged?.Invoke();
+                if (LogCollectFlow)
+                    Debug.Log($"[TileCollect] Click {kind} — no matching order → added to rack at index {_rackCount - 1} (rack now {_rackCount} tile(s)).");
+                return TileCollectResult.AddedToRack;
+            }
+
+            if (applyResult == TileCollectResult.LevelWon)
+            {
+                StateChanged?.Invoke();
+                return TileCollectResult.LevelWon;
+            }
+
+            if (!completedWholeOrder)
                 return TileCollectResult.ConsumedForOrder;
+
+            if (LogCollectFlow)
+                Debug.Log($"[TileCollect] After click {kind}: draining rack against new / remaining orders…");
+
+            var drainResult = TryDrainRackAgainstActiveOrders();
+            if (drainResult == TileCollectResult.LevelWon)
+            {
+                StateChanged?.Invoke();
+                if (LogCollectFlow)
+                    Debug.Log($"[TileCollect] Rack drain finished → level won. Rack now {_rackCount} tile(s).");
+                return TileCollectResult.LevelWon;
+            }
+
+            StateChanged?.Invoke();
+            if (LogCollectFlow)
+                Debug.Log($"[TileCollect] Click {kind} — done (order completed + rack drain). Rack now {_rackCount} tile(s).");
+            return TileCollectResult.ConsumedForOrder;
+        }
+
+        /// <summary>
+        /// Fulfills one matching requirement on the first active order strip that needs <paramref name="kind"/>.
+        /// On a whole-order completion, advances the slot queue (same as a board tile) but does not add to the rack.
+        /// </summary>
+        /// <returns>False when no active order still needs this icon.</returns>
+        bool TryApplyKindToActiveOrders(TileKind kind, CollectApplySource source, out TileCollectResult result, out bool completedWholeOrder)
+        {
+            result = TileCollectResult.ConsumedForOrder;
+            completedWholeOrder = false;
 
             for (var s = 0; s < _slotOrderIndex.Length; s++)
             {
@@ -127,25 +195,49 @@ namespace Gameplay
                 }
 
                 if (allDone)
-                    return FinishOrderInSlot(s);
+                {
+                    completedWholeOrder = true;
+                    if (LogCollectFlow)
+                    {
+                        var src = source == CollectApplySource.FromBoardClick ? "Board" : "Rack auto";
+                        Debug.Log($"[TileCollect] {src}: {kind} completed UI strip {s} (was level order index {oi}).");
+                    }
+
+                    result = AdvanceSlotAfterOrderComplete(s);
+
+                    if (LogCollectFlow && result != TileCollectResult.LevelWon)
+                    {
+                        var nextOi = _slotOrderIndex[s];
+                        if (nextOi >= 0)
+                            Debug.Log($"[TileCollect] Strip {s} advanced to level order index {nextOi} ({_orders.Orders[nextOi].Length} icon(s)).");
+                        else
+                            Debug.Log($"[TileCollect] Strip {s} is now idle (no more queued orders in that slot).");
+                    }
+
+                    if (LogCollectFlow && result == TileCollectResult.LevelWon)
+                    {
+                        var src = source == CollectApplySource.FromBoardClick ? "Board" : "Rack auto";
+                        Debug.Log($"[TileCollect] {src}: that completion finished the final order → level won.");
+                    }
+
+                    return true;
+                }
+
+                if (LogCollectFlow)
+                {
+                    var src = source == CollectApplySource.FromBoardClick ? "Board" : "Rack auto";
+                    Debug.Log($"[TileCollect] {src}: {kind} matched UI strip {s} (level order index {oi}) at icon index {matchIndex} — partial (more icons needed for that customer).");
+                }
 
                 StateChanged?.Invoke();
-                return TileCollectResult.ConsumedForOrder;
+                result = TileCollectResult.ConsumedForOrder;
+                return true;
             }
 
-            if (_rackCount >= GameConstants.RackCapacity)
-            {
-                _failed = true;
-                StateChanged?.Invoke();
-                return TileCollectResult.FailedRackFull;
-            }
-
-            _rack[_rackCount++] = kind;
-            StateChanged?.Invoke();
-            return TileCollectResult.AddedToRack;
+            return false;
         }
 
-        TileCollectResult FinishOrderInSlot(int slot)
+        TileCollectResult AdvanceSlotAfterOrderComplete(int slot)
         {
             _completedOrders++;
 
@@ -162,13 +254,62 @@ namespace Gameplay
             }
 
             if (_completedOrders >= _orders.OrderCount)
-            {
-                StateChanged?.Invoke();
                 return TileCollectResult.LevelWon;
+
+            return TileCollectResult.ConsumedForOrder;
+        }
+
+        /// <summary>
+        /// After a new order appears in a slot, consumes rack tiles left→right when they match any unfilled objective cell (same priority as <see cref="TryCollectTile"/>).
+        /// </summary>
+        TileCollectResult TryDrainRackAgainstActiveOrders()
+        {
+            if (_failed || HasWon)
+                return HasWon ? TileCollectResult.LevelWon : TileCollectResult.ConsumedForOrder;
+
+            while (true)
+            {
+                var progressed = false;
+                for (var i = 0; i < _rackCount;)
+                {
+                    var kind = _rack[i].Value;
+                    if (!TryApplyKindToActiveOrders(kind, CollectApplySource.FromRack, out var r, out _))
+                    {
+                        i++;
+                        continue;
+                    }
+
+                    if (LogCollectFlow)
+                        Debug.Log($"[TileCollect] Rack auto: consumed rack slot {i} ({kind}) — removed from rack and applied to orders.");
+
+                    RemoveRackSlotAt(i);
+                    progressed = true;
+
+                    if (r == TileCollectResult.LevelWon)
+                        return TileCollectResult.LevelWon;
+                }
+
+                if (!progressed)
+                    break;
             }
 
-            StateChanged?.Invoke();
             return TileCollectResult.ConsumedForOrder;
+        }
+
+        void RemoveRackSlotAt(int index)
+        {
+            if ((uint)index >= (uint)_rackCount) return;
+            for (var j = index; j < _rackCount - 1; j++)
+                _rack[j] = _rack[j + 1];
+            _rackCount--;
+            if ((uint)_rackCount < (uint)_rack.Length)
+                _rack[_rackCount] = null;
+        }
+
+        enum CollectApplySource
+        {
+            FromBoardClick,
+            FromRack,
         }
     }
 }
