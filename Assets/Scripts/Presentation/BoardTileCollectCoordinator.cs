@@ -30,6 +30,9 @@ namespace Presentation
 
         public void BindSession(LevelObjectiveSession session) => _session = session;
 
+        /// <summary>Clears the “collect in progress” guard (e.g. when the level is reloaded mid-animation).</summary>
+        public void CancelInFlightCollect() => _tileCollectInFlight = false;
+
         public void HandleTileClicked(BoardTileView view)
         {
             if (_tileCollectInFlight) return;

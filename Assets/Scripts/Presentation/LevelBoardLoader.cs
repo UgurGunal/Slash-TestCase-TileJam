@@ -122,6 +122,8 @@ namespace Presentation
                 _collect.SetPresentationRefs(collectFly, orderRackHud);
             }
 
+            _collect.CancelInFlightCollect();
+
             if (!TryGetJsonText(out var json, out var source))
             {
                 Debug.LogError("[LevelBoardLoader] No JSON source found.", this);

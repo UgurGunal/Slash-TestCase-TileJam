@@ -102,6 +102,22 @@ namespace Presentation
                 losePanel.SetActive(lose);
         }
 
+        /// <summary>
+        /// Reloads the same level the <see cref="LevelBoardLoader"/> is using (Resources path or TextAsset) and closes win/lose panels.
+        /// Wire this to your Retry / Play Again button’s <c>OnClick</c>.
+        /// </summary>
+        public void RetryCurrentLevel()
+        {
+            if (boardLoader == null)
+            {
+                Debug.LogWarning("[GameFlowManager] RetryCurrentLevel: assign boardLoader.", this);
+                return;
+            }
+
+            SetEndPanels(win: false, lose: false);
+            boardLoader.Reload();
+        }
+
         /// <summary>Current progress while playing; default if no session.</summary>
         public GameStatsSnapshot GetLiveStats() => GameStatsSnapshot.FromSession(_session);
     }

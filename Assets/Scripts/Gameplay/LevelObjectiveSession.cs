@@ -227,9 +227,16 @@ namespace Gameplay
                 }
 
                 _rack[_rackCount++] = kind;
-                StateChanged?.Invoke();
-                if (LogCollectFlow)
+                if (_rackCount >= GameConstants.RackCapacity)
+                {
+                    _failed = true;
+                    if (LogCollectFlow)
+                        Debug.Log($"[TileCollect] Click {kind} — rack filled to capacity ({_rackCount}/{GameConstants.RackCapacity}) → level failed.");
+                }
+                else if (LogCollectFlow)
                     Debug.Log($"[TileCollect] Click {kind} — no matching order → added to rack at index {_rackCount - 1} (rack now {_rackCount} tile(s)).");
+
+                StateChanged?.Invoke();
                 return TileCollectResult.AddedToRack;
             }
 
