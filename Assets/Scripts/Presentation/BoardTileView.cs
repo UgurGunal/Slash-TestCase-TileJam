@@ -70,6 +70,16 @@ namespace Presentation
 
         public void SetClickHandler(Action<BoardTileView> onClicked) => _clicked = onClicked;
 
+        public RectTransform IconRectTransform => icon != null ? icon.rectTransform : null;
+
+        /// <summary>Used when flying only the icon to rack/order HUD; removes the board backing immediately.</summary>
+        public void DestroyBackgroundImmediate()
+        {
+            if (background == null) return;
+            Destroy(background.gameObject);
+            background = null;
+        }
+
         /// <summary>Multiplies base colors (e.g. slight green for “active” order columns in the level editor).</summary>
         public void SetActiveOrderHighlight(bool enabled, Color tint)
         {

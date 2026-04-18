@@ -325,5 +325,81 @@ namespace Presentation
             if (t != null)
                 Destroy(t.gameObject);
         }
+
+        /// <summary>Rack HUD image for packed slot index <paramref name="index"/> (0 = leftmost occupied).</summary>
+        public bool TryGetRackSlotImage(int index, out Image img)
+        {
+            img = null;
+            if (rackSlotImages == null || index < 0 || index >= rackSlotImages.Length) return false;
+            img = rackSlotImages[index];
+            return img != null;
+        }
+
+        /// <summary>Resolves the UI rect the board icon should fly to (order cell or next rack slot).</summary>
+        public bool TryGetRectTransformForFlyTarget(TileCollectFlyTarget target, out RectTransform rect)
+        {
+            rect = null;
+            if (_session == null) return false;
+
+            if (target.GoesToRack)
+            {
+                var idx = target.RackSlotIndex;
+                if (idx < 0 || rackSlotImages == null || rackSlotImages.Length == 0) return false;
+                if ((uint)idx < (uint)rackSlotImages.Length && rackSlotImages[idx] != null)
+                {
+                    rect = rackSlotImages[idx].rectTransform;
+                    return true;
+                }
+
+                for (var i = idx; i < rackSlotImages.Length; i++)
+                {
+                    if (rackSlotImages[i] != null)
+                    {
+                        rect = rackSlotImages[i].rectTransform;
+                        return true;
+                    }
+                }
+
+                for (var i = 0; i < idx && i < rackSlotImages.Length; i++)
+                {
+                    if (rackSlotImages[i] != null)
+                    {
+                        rect = rackSlotImages[i].rectTransform;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            var strip = target.OrderStripIndex;
+            var iconIdx = target.OrderIconIndex;
+            if (!_session.GetActiveSlot(strip, out _, out var order, out _)) return false;
+            if (iconIdx < 0 || iconIdx >= order.Length) return false;
+            if (orderStrips == null || strip >= orderStrips.Length) return false;
+            var cells = orderStrips[strip].iconImages;
+            if (cells == null) return false;
+            if (iconIdx < cells.Length && cells[iconIdx] != null)
+            {
+                rect = cells[iconIdx].rectTransform;
+                return true;
+            }
+
+            for (var i = 0; i < order.Length && i < cells.Length; i++)
+            {
+                if (cells[i] == null) continue;
+                rect = cells[i].rectTransform;
+                return true;
+            }
+
+            for (var i = 0; i < cells.Length; i++)
+            {
+                if (cells[i] == null) continue;
+                rect = cells[i].rectTransform;
+                return true;
+            }
+
+            return false;
+        }
     }
 }

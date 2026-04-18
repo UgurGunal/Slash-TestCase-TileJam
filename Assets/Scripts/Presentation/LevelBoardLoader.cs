@@ -1,7 +1,9 @@
 using System.Collections.Generic;
+using Core;
 using Gameplay;
 using LevelData;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Presentation
 {
@@ -26,6 +28,9 @@ namespace Presentation
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
         [SerializeField] OrderRackHud orderRackHud;
+        [Tooltip("Optional: DOTween fly-to-HUD feedback. If unassigned or disabled, collects instantly.")]
+        [FormerlySerializedAs("collectFlyFeedback")]
+        [SerializeField] TileCollectFly collectFly;
         [Tooltip("Log each tile click: order match vs rack, strip indices, and automatic rack→order matches.")]
         [SerializeField] bool logTileCollectFlow;
 
@@ -40,7 +45,26 @@ namespace Presentation
 
         void Awake()
         {
+            ResolveOptionalReferences();
             if (loadOnAwake) Reload();
+        }
+
+        /// <summary>Wires <see cref="collectFly"/> / <see cref="orderRackHud"/> when left unassigned (same GameObject or under the board Canvas).</summary>
+        void ResolveOptionalReferences()
+        {
+            if (collectFly == null)
+                collectFly = GetComponent<TileCollectFly>();
+
+            if (orderRackHud == null && boardRoot != null)
+            {
+                orderRackHud = boardRoot.GetComponentInParent<OrderRackHud>();
+                if (orderRackHud == null)
+                {
+                    var canvas = boardRoot.GetComponentInParent<Canvas>();
+                    if (canvas != null)
+                        orderRackHud = canvas.GetComponentInChildren<OrderRackHud>(true);
+                }
+            }
         }
 
         [ContextMenu("Reload level from JSON")]
@@ -51,6 +75,8 @@ namespace Presentation
         {
             if (!string.IsNullOrWhiteSpace(resourcesPath))
                 resourcesLevelPath = resourcesPath.Trim();
+
+            ResolveOptionalReferences();
 
             if (boardRoot == null || tilePrefab == null)
             {
@@ -151,35 +177,219 @@ namespace Presentation
             var l = view.LayerIndex;
             if (!TileClickability.IsClickable(_playState, x, y, l)) return;
 
+            if (collectFly == null || !collectFly.UseAnimation || orderRackHud == null)
+            {
+                CollectTileInstant(view, x, y, l);
+                return;
+            }
+
+            if (!_session.TryGetFlyTargetForKind(view.Kind, out var flyTarget, out _))
+            {
+                CollectTileInstant(view, x, y, l);
+                return;
+            }
+
+            if (!orderRackHud.TryGetRectTransformForFlyTarget(flyTarget, out var targetRt))
+            {
+                CollectTileInstant(view, x, y, l);
+                return;
+            }
+
+            if (!collectFly.WillAnimate(view, targetRt, boardRoot))
+            {
+                CollectTileInstant(view, x, y, l);
+                return;
+            }
+
+            var kind = view.Kind;
             _tileCollectInFlight = true;
+            _playState.Clear(x, y, l);
+            _tiles.Remove((x, y, l));
+            RefreshTileClickabilityVisuals();
+
+            collectFly.Play(view, targetRt, boardRoot, () => ApplyCollectAfterFlyAnimation(kind));
+        }
+
+        void ApplyCollectAfterFlyAnimation(TileKind kind)
+        {
+            if (_session == null)
+            {
+                EndTileCollectFlight();
+                return;
+            }
+
+            var deferRackFly = collectFly != null && collectFly.UseAnimation && orderRackHud != null;
+            _session.DeferRackDrainAnimation = deferRackFly;
+            TileCollectResult result;
             try
             {
-                var result = _session.TryCollectTile(view.Kind);
-                if (result == TileCollectResult.SessionInactive)
-                {
-                    RefreshTileClickabilityVisuals();
-                    return;
-                }
-
-                if (result == TileCollectResult.FailedRackFull)
-                {
-                    Debug.LogWarning("[LevelBoardLoader] Rack full — level failed.");
-                    RefreshTileClickabilityVisuals();
-                    return;
-                }
-
-                if (result == TileCollectResult.LevelWon)
-                    Debug.Log("[LevelBoardLoader] All orders completed — level won.");
-
-                _playState.Clear(x, y, l);
-                _tiles.Remove((x, y, l));
-                Destroy(view.gameObject);
-                RefreshTileClickabilityVisuals();
+                result = _session.TryCollectTile(kind);
             }
             finally
             {
-                _tileCollectInFlight = false;
+                _session.DeferRackDrainAnimation = false;
             }
+
+            if (result == TileCollectResult.LevelWon)
+                Debug.Log("[LevelBoardLoader] All orders completed — level won.");
+            if (result == TileCollectResult.FailedRackFull)
+                Debug.LogWarning("[LevelBoardLoader] Rack full — level failed.");
+
+            if (result == TileCollectResult.RackDrainPending)
+            {
+                ProcessNextAnimatedRackDrainStep();
+                return;
+            }
+
+            EndTileCollectFlight();
+        }
+
+        void CollectTileInstant(BoardTileView view, int x, int y, int l)
+        {
+            _tileCollectInFlight = true;
+            if (_session == null)
+            {
+                EndTileCollectFlight();
+                return;
+            }
+
+            var deferRackFly = collectFly != null && collectFly.UseAnimation && orderRackHud != null;
+            _session.DeferRackDrainAnimation = deferRackFly;
+            TileCollectResult result;
+            try
+            {
+                result = _session.TryCollectTile(view.Kind);
+            }
+            finally
+            {
+                _session.DeferRackDrainAnimation = false;
+            }
+
+            if (result == TileCollectResult.SessionInactive)
+            {
+                EndTileCollectFlight();
+                return;
+            }
+
+            if (result == TileCollectResult.FailedRackFull)
+            {
+                Debug.LogWarning("[LevelBoardLoader] Rack full — level failed.");
+                EndTileCollectFlight();
+                return;
+            }
+
+            if (result == TileCollectResult.LevelWon)
+                Debug.Log("[LevelBoardLoader] All orders completed — level won.");
+
+            _playState.Clear(x, y, l);
+            _tiles.Remove((x, y, l));
+            Destroy(view.gameObject);
+
+            if (result == TileCollectResult.RackDrainPending)
+            {
+                ProcessNextAnimatedRackDrainStep();
+                return;
+            }
+
+            EndTileCollectFlight();
+        }
+
+        void EndTileCollectFlight()
+        {
+            RefreshTileClickabilityVisuals();
+            _tileCollectInFlight = false;
+        }
+
+        void FinishRackDrainSynchronously()
+        {
+            if (_session == null) return;
+            while (_session.TryPeekRackDrainStep(out var i, out _, out _))
+            {
+                var r = _session.ApplyRackDrainStepAt(i);
+                if (r == TileCollectResult.LevelWon)
+                {
+                    Debug.Log("[LevelBoardLoader] All orders completed — level won.");
+                    break;
+                }
+            }
+
+            _session.NotifyStateChanged();
+        }
+
+        void ProcessNextAnimatedRackDrainStep()
+        {
+            if (_session == null)
+            {
+                EndTileCollectFlight();
+                return;
+            }
+
+            if (collectFly == null || !collectFly.UseAnimation || orderRackHud == null || boardRoot == null)
+            {
+                FinishRackDrainSynchronously();
+                EndTileCollectFlight();
+                return;
+            }
+
+            while (_session.TryPeekRackDrainStep(out var rackIdx, out _, out var orderTarget))
+            {
+                if (!orderRackHud.TryGetRackSlotImage(rackIdx, out var rackImg))
+                {
+                    var r = _session.ApplyRackDrainStepAt(rackIdx);
+                    _session.NotifyStateChanged();
+                    if (r == TileCollectResult.LevelWon)
+                    {
+                        Debug.Log("[LevelBoardLoader] All orders completed — level won.");
+                        EndTileCollectFlight();
+                        return;
+                    }
+
+                    continue;
+                }
+
+                if (!orderRackHud.TryGetRectTransformForFlyTarget(orderTarget, out var targetRt))
+                {
+                    FinishRackDrainSynchronously();
+                    EndTileCollectFlight();
+                    return;
+                }
+
+                var rackRt = rackImg.rectTransform;
+                if (!collectFly.WillAnimateUiRect(rackRt, targetRt, boardRoot))
+                {
+                    FinishRackDrainSynchronously();
+                    EndTileCollectFlight();
+                    return;
+                }
+
+                collectFly.PlayUiDuplicate(rackRt, targetRt, boardRoot, () => RackDrainStepApplyAndContinue(rackIdx));
+                rackImg.enabled = false;
+                return;
+            }
+
+            _session.NotifyStateChanged();
+            EndTileCollectFlight();
+        }
+
+        void RackDrainStepApplyAndContinue(int rackIdx)
+        {
+            if (_session == null)
+            {
+                EndTileCollectFlight();
+                return;
+            }
+
+            var applyResult = _session.ApplyRackDrainStepAt(rackIdx);
+            _session.NotifyStateChanged();
+
+            if (applyResult == TileCollectResult.LevelWon)
+            {
+                Debug.Log("[LevelBoardLoader] All orders completed — level won.");
+                EndTileCollectFlight();
+                return;
+            }
+
+            ProcessNextAnimatedRackDrainStep();
         }
 
         void RefreshTileClickabilityVisuals()
