@@ -84,6 +84,9 @@ namespace Presentation
 
         readonly List<List<TileKind>> _orderColumns = new List<List<TileKind>>();
 
+        /// <summary>Deep copy of <see cref="_orderColumns"/> taken when orders are finalized (before placement consumes tiles). Used for JSON export so customer groupings survive an empty queue.</summary>
+        List<List<TileKind>> _ordersSnapshotAtFinalize;
+
         bool _ordersAuthoringFinalized;
         Color _orderContentBaseColor;
         bool _orderContentBaseCaptured;
@@ -351,6 +354,7 @@ namespace Presentation
         public void ClearFinalizedOrders()
         {
             _ordersAuthoringFinalized = false;
+            _ordersSnapshotAtFinalize = null;
             _orderColumns.Clear();
             _orderColumns.Add(new List<TileKind>());
             _rebuildQueued = true;
@@ -364,6 +368,7 @@ namespace Presentation
         {
             if (_ordersAuthoringFinalized) return;
             _ordersAuthoringFinalized = true;
+            CaptureOrdersSnapshotAtFinalize();
             _rebuildQueued = true;
             onOrdersAuthoringFinalized?.Invoke();
             OnOrdersAuthoringFinalized?.Invoke();
@@ -374,8 +379,65 @@ namespace Presentation
         {
             if (!_ordersAuthoringFinalized) return;
             _ordersAuthoringFinalized = false;
+            _ordersSnapshotAtFinalize = null;
             _rebuildQueued = true;
             OnOrdersAuthoringUnlocked?.Invoke();
+        }
+
+        void CaptureOrdersSnapshotAtFinalize()
+        {
+            _ordersSnapshotAtFinalize = new List<List<TileKind>>();
+            for (var i = 0; i < _orderColumns.Count; i++)
+            {
+                var col = _orderColumns[i];
+                _ordersSnapshotAtFinalize.Add(col != null ? new List<TileKind>(col) : new List<TileKind>());
+            }
+        }
+
+        /// <summary>True when every order column is empty (all tiles placed on the board / rack pipeline cleared for export).</summary>
+        public bool AreAllOrderColumnsEmptyForExport()
+        {
+            EnsureAtLeastOneColumn();
+            for (var i = 0; i < _orderColumns.Count; i++)
+            {
+                var col = _orderColumns[i];
+                if (col != null && col.Count > 0)
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>Builds the level JSON <c>orders</c> array from the finalize snapshot (non-empty columns only).</summary>
+        public bool TryGetSnapshotOrdersForExport(out List<List<int>> orders, out string error)
+        {
+            orders = null;
+            error = null;
+            if (_ordersSnapshotAtFinalize == null)
+            {
+                error = "No finalized order snapshot. Finalize orders again.";
+                return false;
+            }
+
+            orders = new List<List<int>>();
+            for (var c = 0; c < _ordersSnapshotAtFinalize.Count; c++)
+            {
+                var col = _ordersSnapshotAtFinalize[c];
+                if (col == null || col.Count == 0)
+                    continue;
+                var row = new List<int>(col.Count);
+                for (var i = 0; i < col.Count; i++)
+                    row.Add((int)col[i]);
+                orders.Add(row);
+            }
+
+            if (orders.Count == 0)
+            {
+                error = "Finalized orders snapshot is empty.";
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>Last icon in the rightmost non-empty order column (the tile meant for board placement after finalize).</summary>

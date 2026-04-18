@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using Core;
 using LevelData;
+using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -58,6 +60,175 @@ namespace Presentation
         int _handRackSlotIndex = -1;
 
         public LevelEditorAuthoringPhase Phase => _phase;
+
+        /// <summary>
+        /// Builds validated level JSON (same shape as <see cref="LevelGridParser"/>). Requires all tiles on the board,
+        /// empty hand, empty rack, and empty order queue; customer groupings come from the snapshot taken at finalize.
+        /// </summary>
+        public bool TryExportLevelJson(out string json, out string error)
+        {
+            json = null;
+            error = null;
+            if (orderPanel == null)
+            {
+                error = "Order panel is not assigned.";
+                return false;
+            }
+
+            if (grid == null)
+            {
+                error = "Grid is not assigned.";
+                return false;
+            }
+
+            if (_cells == null)
+            {
+                error = "Nothing to export: finalize orders and create the board layout first.";
+                return false;
+            }
+
+            if (!orderPanel.OrdersAuthoringFinalized)
+            {
+                error = "Orders are not finalized.";
+                return false;
+            }
+
+            if (_handKind != TileKind.None)
+            {
+                error = "Place the hand tile on the board before export.";
+                return false;
+            }
+
+            if (RackHasAnyTile())
+            {
+                error = "Place all rack tiles on the board before export.";
+                return false;
+            }
+
+            if (!orderPanel.AreAllOrderColumnsEmptyForExport())
+            {
+                error = "Place all remaining order tiles on the board before export.";
+                return false;
+            }
+
+            if (!orderPanel.TryGetSnapshotOrdersForExport(out var ordersDto, out error))
+                return false;
+
+            if (!TryCollectBoardKindInts(out var boardKinds, out error))
+                return false;
+
+            if (!TryFlattenOrderInts(ordersDto, out var orderFlat, out error))
+                return false;
+
+            if (!MultisetsEqualSorted(boardKinds, orderFlat))
+            {
+                error = "Board tiles do not match finalized orders (every snapshot tile must be on the board).";
+                return false;
+            }
+
+            var dto = BuildMatrix3DLevelJsonDtoFromCells();
+            dto.Orders = ordersDto;
+
+            if (!LevelGridParser.TryBuildLevelDefinition(dto, out _, out error))
+                return false;
+
+            json = JsonConvert.SerializeObject(dto, Formatting.Indented);
+            return true;
+        }
+
+        static bool TryFlattenOrderInts(IReadOnlyList<List<int>> orders, out List<int> flat, out string error)
+        {
+            flat = new List<int>();
+            error = null;
+            for (var oi = 0; oi < orders.Count; oi++)
+            {
+                var row = orders[oi];
+                if (row == null) continue;
+                for (var i = 0; i < row.Count; i++)
+                    flat.Add(row[i]);
+            }
+
+            if (flat.Count == 0)
+            {
+                error = "Orders export produced no icons.";
+                return false;
+            }
+
+            return true;
+        }
+
+        static bool MultisetsEqualSorted(List<int> a, List<int> b)
+        {
+            if (a.Count != b.Count)
+                return false;
+            a.Sort();
+            b.Sort();
+            for (var i = 0; i < a.Count; i++)
+            {
+                if (a[i] != b[i])
+                    return false;
+            }
+
+            return true;
+        }
+
+        bool TryCollectBoardKindInts(out List<int> kinds, out string error)
+        {
+            kinds = new List<int>();
+            error = null;
+            if (_cells == null)
+            {
+                error = "Board is not initialized.";
+                return false;
+            }
+
+            var pw = _cells.GetLength(0);
+            var ph = _cells.GetLength(1);
+            var d = _cells.GetLength(2);
+            for (var z = 0; z < d; z++)
+            for (var y = 0; y < ph; y++)
+            for (var x = 0; x < pw; x++)
+            {
+                var v = _cells[x, y, z];
+                if (v.HasValue)
+                    kinds.Add((int)v.Value);
+            }
+
+            return true;
+        }
+
+        Matrix3DLevelJsonDto BuildMatrix3DLevelJsonDtoFromCells()
+        {
+            var pw = _cells.GetLength(0);
+            var ph = _cells.GetLength(1);
+            var depth = _cells.GetLength(2);
+            var layers = new List<List<List<int>>>();
+            for (var l = 0; l < depth; l++)
+            {
+                var layer = new List<List<int>>();
+                for (var y = 0; y < ph; y++)
+                {
+                    var row = new List<int>();
+                    for (var x = 0; x < pw; x++)
+                    {
+                        var v = _cells[x, y, l];
+                        row.Add(v.HasValue ? (int)v.Value : -1);
+                    }
+
+                    layer.Add(row);
+                }
+
+                layers.Add(layer);
+            }
+
+            return new Matrix3DLevelJsonDto
+            {
+                Width = pw,
+                Height = ph,
+                Depth = depth,
+                Matrix3D = layers,
+            };
+        }
 
         void OnEnable()
         {
