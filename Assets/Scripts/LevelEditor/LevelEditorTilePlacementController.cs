@@ -2,10 +2,11 @@ using System.Collections.Generic;
 using Core;
 using LevelData;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Presentation
 {
-    /// <summary>High-level editor mode: after orders are finalized, the last tile of the last order is held until placed on the board grid.</summary>
+    /// <summary>High-level editor mode: after orders are finalized, the last tile of the last order is held until placed on the rack or board grid.</summary>
     public enum LevelEditorAuthoringPhase
     {
         OrderCreation = 0,
@@ -14,8 +15,8 @@ namespace Presentation
 
     /// <summary>
     /// After <see cref="LevelEditorOrderAuthoringPanel"/> finalizes orders, the last tile in the last order column is shown in <see cref="handTileParent"/>.
-    /// Clicks use the half-cell placement lattice (same as hover): (2W−1)×(2H−1) slots on a W×H major grid.
-    /// Empty board uses layer 0. Chebyshev |Δ|≤1 in <b>slot</b> indices picks stacking layer max+1.
+    /// Each click can send the tile to the <b>rack</b> (first empty slot under the pointer) or to the <b>grid</b> if the pointer is over the board.
+    /// Grid: half-cell placement lattice (2W−1)×(2H−1) slots; layer 0 on empty board; Chebyshev |Δ|≤1 in slot indices for stacking.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class LevelEditorTilePlacementController : MonoBehaviour
@@ -32,11 +33,17 @@ namespace Presentation
         [Tooltip("Max stacking depth for placement (board JSON depth).")]
         [SerializeField] int maxBoardDepth = 16;
         [SerializeField] Canvas canvasOverride;
+        [Tooltip("Optional: six UI slot RectTransforms (e.g. left→right). Pointer over an empty slot sends the tile to the rack instead of the grid. Leave empty to disable rack.")]
+        [SerializeField] RectTransform[] editorRackSlotRects;
+        [Tooltip("Extra multiplier on rack tile scale vs order-column tiles (1 = match orders). Order tiles use Order Tile Cell Size + Order Tile Scale on the order panel.")]
+        [SerializeField] [Range(0.2f, 1.5f)] float rackTileScaleInCell = 1f;
 
         LevelEditorAuthoringPhase _phase = LevelEditorAuthoringPhase.OrderCreation;
         TileKind _handKind = TileKind.None;
         BoardTileView _handView;
         TileKind?[, ,] _cells;
+        TileKind?[] _rackSlots;
+        BoardTileView[] _rackTileViews;
         readonly Dictionary<(int x, int y, int z), BoardTileView> _tileViews = new Dictionary<(int x, int y, int z), BoardTileView>();
 
         public LevelEditorAuthoringPhase Phase => _phase;
@@ -59,6 +66,19 @@ namespace Presentation
             }
         }
 
+#if UNITY_EDITOR
+        void OnValidate()
+        {
+            if (editorRackSlotRects != null && editorRackSlotRects.Length > 0 &&
+                editorRackSlotRects.Length != GameConstants.RackCapacity)
+            {
+                Debug.LogWarning(
+                    $"[LevelEditorTilePlacementController] Assign exactly {GameConstants.RackCapacity} entries in {nameof(editorRackSlotRects)} (or leave empty to disable rack).",
+                    this);
+            }
+        }
+#endif
+
         void Update()
         {
             if (_phase != LevelEditorAuthoringPhase.PlacingTilesFromOrders || _handKind == TileKind.None)
@@ -72,15 +92,21 @@ namespace Presentation
             if (!Input.GetMouseButtonDown(0))
                 return;
 
-            if (grid == null || boardTilesRoot == null || tilePrefab == null || _cells == null)
+            if (tilePrefab == null || _cells == null)
+                return;
+
+            var canvas = canvasOverride != null ? canvasOverride : GetComponentInParent<Canvas>();
+            var cam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+
+            if (TryPlaceOnRackIfClicked(canvas, cam))
+                return;
+
+            if (grid == null || boardTilesRoot == null)
                 return;
 
             var linesRt = grid.LinesContentRect;
             if (linesRt == null)
                 return;
-
-            var canvas = canvasOverride != null ? canvasOverride : GetComponentInParent<Canvas>();
-            var cam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
 
             if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(linesRt, Input.mousePosition, cam, out var localInLines))
                 return;
@@ -111,7 +137,118 @@ namespace Presentation
 
             PlaceTileAt(px, py, layer, _handKind);
             RefreshTileClickabilityVisuals();
+            AdvanceHandAfterSuccessfulPlacement();
+        }
 
+        bool TryPlaceOnRackIfClicked(Canvas canvas, Camera cam)
+        {
+            if (_rackSlots == null || editorRackSlotRects == null || editorRackSlotRects.Length == 0)
+                return false;
+            if (!RackHasEmptySlot())
+                return false;
+            if (!TryGetRackSlotUnderPointer(canvas, cam, out var slot))
+                return false;
+            if (_rackSlots[slot].HasValue)
+                return true;
+
+            PlaceTileInRack(slot, _handKind);
+            AdvanceHandAfterSuccessfulPlacement();
+            return true;
+        }
+
+        bool RackHasEmptySlot()
+        {
+            if (_rackSlots == null) return false;
+            for (var i = 0; i < _rackSlots.Length; i++)
+            {
+                if (!_rackSlots[i].HasValue)
+                    return true;
+            }
+
+            return false;
+        }
+
+        bool TryGetRackSlotUnderPointer(Canvas canvas, Camera cam, out int slotIndex)
+        {
+            slotIndex = -1;
+            var screen = Input.mousePosition;
+            for (var i = 0; i < editorRackSlotRects.Length && i < GameConstants.RackCapacity; i++)
+            {
+                var rt = editorRackSlotRects[i];
+                if (rt == null) continue;
+                if (RectTransformUtility.ScreenPointToLocalPointInRectangle(rt, screen, cam, out var local) &&
+                    rt.rect.Contains(local))
+                {
+                    slotIndex = i;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        void PlaceTileInRack(int slotIndex, TileKind kind)
+        {
+            _rackSlots[slotIndex] = kind;
+            var parent = editorRackSlotRects[slotIndex];
+            var view = Instantiate(tilePrefab, parent, false);
+            view.gameObject.name = $"Rack_{slotIndex}_{kind}";
+            var tileRt = (RectTransform)view.transform;
+            ConfigureTileVisualLikeOrders(view, kind, tileRt, slotIndex, -1, -1, rackTileScaleInCell);
+            view.SetClickableVisual(true);
+            view.SetClickHandler(null);
+            _rackTileViews[slotIndex] = view;
+        }
+
+        /// <summary>Same as order-column tiles: <see cref="LevelEditorOrderAuthoringPanel.OrderTileCellSize"/> + Bind scale 1 + uniform scale.</summary>
+        void ConfigureTileVisualLikeOrders(
+            BoardTileView view,
+            TileKind kind,
+            RectTransform tileRt,
+            int gridX,
+            int gridY,
+            int layerIndex,
+            float extraUniformScale)
+        {
+            tileRt.anchorMin = tileRt.anchorMax = tileRt.pivot = new Vector2(0.5f, 0.5f);
+            tileRt.anchoredPosition = Vector2.zero;
+            tileRt.localScale = Vector3.one;
+            StripLayoutElementIfAny(view.gameObject);
+
+            Vector2 cell;
+            float uniformScale;
+            if (orderPanel != null)
+            {
+                cell = orderPanel.OrderTileCellSize;
+                uniformScale = orderPanel.OrderTileUniformScale * extraUniformScale;
+            }
+            else
+            {
+                var cw = grid.GridCellWidth;
+                var ch = grid.GridCellHeight;
+                cell = new Vector2(cw, ch);
+                uniformScale = boardTileScaleInCell * extraUniformScale;
+            }
+
+            view.Bind(kind, gridX, gridY, layerIndex, Vector2.zero, cell, 1f, iconLibrary);
+            ApplyUniformVisualScale(tileRt, uniformScale);
+        }
+
+        static void ApplyUniformVisualScale(RectTransform tileRt, float uniformScale)
+        {
+            var s = Mathf.Max(0.01f, uniformScale);
+            tileRt.localScale = new Vector3(s, s, 1f);
+        }
+
+        static void StripLayoutElementIfAny(GameObject go)
+        {
+            var le = go.GetComponent<LayoutElement>();
+            if (le == null) return;
+            Destroy(le);
+        }
+
+        void AdvanceHandAfterSuccessfulPlacement()
+        {
             if (orderPanel == null || !orderPanel.TryConsumeLastTileFromOrdersForPlacement(out _))
             {
                 Debug.LogWarning("[LevelEditorTilePlacementController] Could not remove placed tile from order data.");
@@ -151,6 +288,9 @@ namespace Presentation
             _cells = new TileKind?[pw, ph, d];
             _tileViews.Clear();
             ClearChildren(boardTilesRoot);
+            ClearRackState();
+            _rackSlots = new TileKind?[GameConstants.RackCapacity];
+            _rackTileViews = new BoardTileView[GameConstants.RackCapacity];
 
             _handKind = kind;
             _phase = LevelEditorAuthoringPhase.PlacingTilesFromOrders;
@@ -164,8 +304,23 @@ namespace Presentation
             ClearHandViewOnly();
             _cells = null;
             _tileViews.Clear();
+            ClearRackState();
+            _rackSlots = null;
+            _rackTileViews = null;
             if (boardTilesRoot != null)
                 ClearChildren(boardTilesRoot);
+        }
+
+        void ClearRackState()
+        {
+            if (_rackTileViews == null) return;
+            for (var i = 0; i < _rackTileViews.Length; i++)
+            {
+                var v = _rackTileViews[i];
+                if (v == null) continue;
+                Destroy(v.gameObject);
+                _rackTileViews[i] = null;
+            }
         }
 
         int ComputePlacementLayer(int px, int py)
@@ -227,16 +382,10 @@ namespace Presentation
             if (handTileParent == null || tilePrefab == null || _handKind == TileKind.None || grid == null)
                 return;
 
-            var majorW = grid.GridWidthCells;
-            var majorH = grid.GridHeightCells;
-            var cw = grid.GridCellWidth;
-            var ch = grid.GridCellHeight;
-            var gridW = majorW * cw;
-            var gridH = majorH * ch;
-            var cell = new Vector2(cw, ch);
             _handView = Instantiate(tilePrefab, handTileParent, false);
             _handView.gameObject.name = "HandTile";
-            _handView.Bind(_handKind, -1, -1, -1, Vector2.zero, cell, boardTileScaleInCell, iconLibrary);
+            var tileRt = (RectTransform)_handView.transform;
+            ConfigureTileVisualLikeOrders(_handView, _handKind, tileRt, -1, -1, -1, 1f);
             _handView.SetClickableVisual(true);
             _handView.SetClickHandler(null);
         }

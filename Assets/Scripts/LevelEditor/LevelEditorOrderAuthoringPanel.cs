@@ -127,6 +127,12 @@ namespace Presentation
         /// <summary>True after <see cref="FinalizeOrders"/> until <see cref="ClearFinalizedOrders"/> or <see cref="UnlockOrderAuthoring"/>.</summary>
         public bool OrdersAuthoringFinalized => _ordersAuthoringFinalized;
 
+        /// <summary>Logical cell size for order column tiles (argument to <see cref="BoardTileView.Bind"/> with scale 1).</summary>
+        public Vector2 OrderTileCellSize => orderTileCellSize;
+
+        /// <summary>Uniform <see cref="RectTransform.localScale"/> applied to order tiles after <see cref="BoardTileView.Bind"/>.</summary>
+        public float OrderTileUniformScale => orderTileScale;
+
         /// <summary>Invoked with <see cref="onOrdersAuthoringFinalized"/> when orders are locked.</summary>
         public event Action OnOrdersAuthoringFinalized;
 
