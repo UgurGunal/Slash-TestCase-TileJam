@@ -21,7 +21,7 @@ namespace Presentation
 
     /// <summary>
     /// Level editor UI: palette picks tile kinds; orders live in one panel — columns left-to-right, tiles top-to-bottom
-    /// per column. The rightmost column is active until <see cref="AddOrderFromDraft"/> starts the next column.
+    /// per column. After finalize, the <b>two rightmost non-empty</b> columns are “active” (slight green tint) until they empty.
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
@@ -71,6 +71,9 @@ namespace Presentation
         [Tooltip("If unset, uses a Graphic on Order Columns Panel. Tint when orders are finalized.")]
         [SerializeField] Graphic orderContentColorTarget;
         [SerializeField] Color orderContentFinalizedTint = new Color(0.9f, 0.92f, 0.98f, 1f);
+        [Header("Active orders (after finalize)")]
+        [Tooltip("Tiles in the two rightmost non-empty order columns get this tint (active orders). When a column empties, the next columns become active.")]
+        [SerializeField] Color activeOrderTileTint = new Color(0.82f, 1f, 0.88f, 1f);
 
         [Header("Events")]
         [SerializeField] UnityEvent<int> onPaletteTileKindClicked;
@@ -110,6 +113,8 @@ namespace Presentation
         OrderScrollAfterRebuild _pendingScrollMode;
         float _pendingScrollNormalized;
         bool _pendingScrollApply;
+
+        readonly HashSet<int> _activeOrderColumnIndicesScratch = new HashSet<int>();
 
         /// <summary>Rightmost column — the one palette clicks append to.</summary>
         public IReadOnlyList<TileKind> ActiveColumn =>
@@ -468,6 +473,28 @@ namespace Presentation
             return any ? sb.ToString() : string.Empty;
         }
 
+        /// <summary>
+        /// Active orders = the two columns with the <b>largest indices</b> that still have at least one tile (the rightmost non-empty columns).
+        /// When the rightmost column empties, the next columns become active automatically on rebuild.
+        /// </summary>
+        void RecomputeActiveOrderColumnIndicesForHighlight()
+        {
+            _activeOrderColumnIndicesScratch.Clear();
+            var nonempty = new List<int>();
+            for (var i = 0; i < _orderColumns.Count; i++)
+            {
+                if (_orderColumns[i] != null && _orderColumns[i].Count > 0)
+                    nonempty.Add(i);
+            }
+
+            if (nonempty.Count == 0) return;
+            nonempty.Sort();
+            var n = nonempty.Count;
+            _activeOrderColumnIndicesScratch.Add(nonempty[n - 1]);
+            if (n >= 2)
+                _activeOrderColumnIndicesScratch.Add(nonempty[n - 2]);
+        }
+
         void RebuildOrderColumnsVisuals()
         {
             if (orderColumnsPanel == null || tilePrefab == null) return;
@@ -484,6 +511,8 @@ namespace Presentation
                 orderAreaHLayoutPadRight,
                 orderAreaHLayoutPadTop,
                 orderAreaHLayoutPadBottom);
+
+            RecomputeActiveOrderColumnIndicesForHighlight();
 
             for (var ci = 0; ci < _orderColumns.Count; ci++)
             {
@@ -508,6 +537,10 @@ namespace Presentation
                     StripLayoutElementFrom(tile.gameObject);
                     tile.Bind(kind, ti, ci, 0, Vector2.zero, orderTileCellSize, 1f, iconLibrary);
                     ApplyUniformVisualScale(tileRt, orderTileScale);
+                    if (_ordersAuthoringFinalized && _activeOrderColumnIndicesScratch.Contains(ci))
+                        tile.SetActiveOrderHighlight(true, activeOrderTileTint);
+                    else
+                        tile.SetActiveOrderHighlight(false, activeOrderTileTint);
                     var orderEditable = !_ordersAuthoringFinalized;
                     tile.SetClickableVisual(true);
                     if (orderEditable && isActiveColumn)

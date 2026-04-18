@@ -27,6 +27,8 @@ namespace Presentation
 
         Color _baseBackgroundColor = Color.white;
         Color _baseIconColor = Color.white;
+        Color _activeOrderTint = Color.white;
+        bool _clickableState = true;
         Action<BoardTileView> _clicked;
 
         public TileKind Kind { get; private set; }
@@ -60,16 +62,33 @@ namespace Presentation
                 icon.raycastTarget = false;
                 _baseIconColor = icon.color;
             }
+
+            _clickableState = true;
+            _activeOrderTint = Color.white;
+            RefreshTintedColors();
         }
 
         public void SetClickHandler(Action<BoardTileView> onClicked) => _clicked = onClicked;
 
+        /// <summary>Multiplies base colors (e.g. slight green for “active” order columns in the level editor).</summary>
+        public void SetActiveOrderHighlight(bool enabled, Color tint)
+        {
+            _activeOrderTint = enabled ? tint : Color.white;
+            RefreshTintedColors();
+        }
+
         public void SetClickableVisual(bool clickable)
         {
+            _clickableState = clickable;
+            RefreshTintedColors();
+        }
+
+        void RefreshTintedColors()
+        {
             if (background != null)
-                background.color = clickable ? _baseBackgroundColor : _baseBackgroundColor * blockedTint;
+                background.color = _clickableState ? _baseBackgroundColor * _activeOrderTint : _baseBackgroundColor * _activeOrderTint * blockedTint;
             if (icon != null)
-                icon.color = clickable ? _baseIconColor : _baseIconColor * blockedTint;
+                icon.color = _clickableState ? _baseIconColor * _activeOrderTint : _baseIconColor * _activeOrderTint * blockedTint;
         }
 
         public void OnPointerClick(PointerEventData eventData) => _clicked?.Invoke(this);
