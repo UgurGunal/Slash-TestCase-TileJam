@@ -84,6 +84,20 @@ namespace Presentation
             rt.DOScale(1f, dur).SetEase(cfg.ScaleEase).SetDelay(delay);
         }
 
+        /// <summary>Destroys all spawned tiles and clears grid state (e.g. before a delayed rebuild).</summary>
+        public void TearDownTiles()
+        {
+            foreach (var view in _tiles.Values)
+            {
+                if (view == null) continue;
+                view.transform.DOKill(false);
+                UnityEngine.Object.Destroy(view.gameObject);
+            }
+
+            _tiles.Clear();
+            PlayState = null;
+        }
+
         /// <summary>Clears logical cell and removes the view from the map; does not destroy the view (board fly handles that).</summary>
         public void DetachTileForAnimatedCollect(BoardTileView view, int x, int y, int l)
         {

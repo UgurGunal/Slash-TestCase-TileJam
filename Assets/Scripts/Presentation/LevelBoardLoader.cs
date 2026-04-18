@@ -1,3 +1,4 @@
+using System.Collections;
 using DG.Tweening;
 using Gameplay;
 using LevelData;
@@ -36,6 +37,12 @@ namespace Presentation
         [Tooltip("Log each tile click: order match vs rack, strip indices, and automatic rack→order matches.")]
         [SerializeField] bool logTileCollectFlow;
 
+        [Header("Board timing")]
+        [Tooltip(
+            "Wait this long after level data is ready before spawning tiles (session/HUD bind immediately). " +
+            "If > 0, any previous tiles are removed right away so clicks cannot use a stale board with the new session.")]
+        [SerializeField] float boardInitializationDelaySec = 0.2f;
+
         [Header("Tile spawn intro")]
         [Tooltip("On load, scale tiles from 0 → 1 with DOTween; same layer starts together, next layer delayed by the stagger.")]
         [SerializeField] bool tileSpawnScaleIn = true;
@@ -50,6 +57,7 @@ namespace Presentation
         LevelBoardGrid _grid;
         BoardTileCollectCoordinator _collect;
         LevelObjectiveSession _session;
+        int _boardBuildGeneration;
 
         void Awake()
         {
@@ -129,7 +137,36 @@ namespace Presentation
             _collect.BindSession(_session);
             Debug.Log($"[LevelBoardLoader] Loaded from {source}\n{LevelGridParser.BuildValidationReport(definition.Board)}");
 
-            if (clearExistingChildren)
+            _boardBuildGeneration++;
+            var buildId = _boardBuildGeneration;
+            if (boardInitializationDelaySec > 0f)
+            {
+                _grid.TearDownTiles();
+                if (clearExistingChildren && boardRoot != null)
+                {
+                    for (var i = boardRoot.childCount - 1; i >= 0; i--)
+                        Destroy(boardRoot.GetChild(i).gameObject);
+                }
+
+                StartCoroutine(RunBoardBuildAfterDelay(definition.Board, buildId));
+            }
+            else
+            {
+                RunBoardBuild(definition.Board);
+            }
+        }
+
+        IEnumerator RunBoardBuildAfterDelay(LevelBoardSpec boardSpec, int scheduledGeneration)
+        {
+            yield return new WaitForSeconds(boardInitializationDelaySec);
+            if (scheduledGeneration != _boardBuildGeneration)
+                yield break;
+            RunBoardBuild(boardSpec);
+        }
+
+        void RunBoardBuild(LevelBoardSpec boardSpec)
+        {
+            if (clearExistingChildren && boardRoot != null)
             {
                 for (var i = boardRoot.childCount - 1; i >= 0; i--)
                     Destroy(boardRoot.GetChild(i).gameObject);
@@ -145,7 +182,7 @@ namespace Presentation
                 }
                 : TileSpawnIntroConfig.Disabled;
 
-            _grid.BuildFromSpec(definition.Board, tilePrefab, visualLayout, tileIconLibrary, OnTileClicked, spawnIntro);
+            _grid.BuildFromSpec(boardSpec, tilePrefab, visualLayout, tileIconLibrary, OnTileClicked, spawnIntro);
         }
 
         void OnTileClicked(BoardTileView view) => _collect?.HandleTileClicked(view);
