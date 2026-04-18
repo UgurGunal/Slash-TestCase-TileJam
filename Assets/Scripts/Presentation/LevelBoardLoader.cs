@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Text.RegularExpressions;
 using DG.Tweening;
 using Gameplay;
 using LevelData;
@@ -18,6 +19,10 @@ namespace Presentation
         [SerializeField] TextAsset levelJson;
         [Tooltip("Path relative to a Resources folder, without extension. Example: Levels/level_1 for Assets/Resources/Levels/level_1.json")]
         [SerializeField] string resourcesLevelPath = "Levels/level_1";
+
+        [Header("Numbered levels (Resources)")]
+        [Tooltip("Fallback folder for TryLoadNextLevel when resourcesLevelPath has no folder (e.g. only “level_1”). Default: Levels.")]
+        [SerializeField] string numberedLevelsResourcesFolder = "Levels";
 
         [Header("Board")]
         [SerializeField] RectTransform boardRoot;
@@ -54,6 +59,12 @@ namespace Presentation
         public LevelBoardSpec LastSpec { get; private set; }
         public LevelDefinition LastDefinition { get; private set; }
         public LevelObjectiveSession Session => _session;
+
+        /// <summary>Last successfully loaded 1-based level index from a <c>.../level_N</c> Resources path; used for <see cref="TryLoadNextLevel"/>.</summary>
+        public int CurrentLevelNumber { get; private set; } = 1;
+
+        /// <summary>When false, level JSON comes from the inspector TextAsset and <see cref="TryLoadNextLevel"/> will not run.</summary>
+        public bool UsesNumberedResourcesLevels => levelJson == null;
 
         /// <summary>Invoked after each successful <see cref="Reload"/> when a new <see cref="LevelObjectiveSession"/> is created and bound.</summary>
         public event Action<LevelObjectiveSession> SessionAssigned;
@@ -100,6 +111,60 @@ namespace Presentation
         [ContextMenu("Reload level from JSON")]
         public void Reload() => Reload(resourcesLevelPath);
 
+        /// <summary>
+        /// Loads <c>Resources/{folder}/level_{CurrentLevelNumber+1}</c> if present. Returns false if there is no asset (e.g. last level).
+        /// Does nothing if a <see cref="levelJson"/> TextAsset is assigned (clear it to use Resources progression).
+        /// </summary>
+        public bool TryLoadNextLevel()
+        {
+            if (levelJson != null)
+            {
+                Debug.LogWarning("[LevelBoardLoader] Clear level TextAsset to advance numbered Resources levels.", this);
+                return false;
+            }
+
+            var next = CurrentLevelNumber + 1;
+            var path = BuildNumberedLevelResourcesPathForIndex(next);
+            if (Resources.Load<TextAsset>(path) == null)
+            {
+                Debug.LogWarning(
+                    $"[LevelBoardLoader] No next level: Resources.Load(\"{path}\") is null (add Assets/Resources/{path}.json).",
+                    this);
+                return false;
+            }
+
+            Reload(path);
+            return true;
+        }
+
+        /// <summary>Resources path (no extension) for <c>level_{index}</c> using the same folder as the last path, or <see cref="numberedLevelsResourcesFolder"/>.</summary>
+        public string BuildNumberedLevelResourcesPathForIndex(int levelIndexOneBased)
+        {
+            var n = Mathf.Max(1, levelIndexOneBased);
+            var folder = ResolveNumberedLevelsFolderPrefix();
+            return $"{folder}/level_{n}";
+        }
+
+        string ResolveNumberedLevelsFolderPrefix()
+        {
+            if (TryExtractFolderFromResourcesPath(resourcesLevelPath, out var fromPath))
+                return fromPath;
+            var fb = string.IsNullOrWhiteSpace(numberedLevelsResourcesFolder)
+                ? "Levels"
+                : numberedLevelsResourcesFolder.Trim().Trim('/');
+            return fb;
+        }
+
+        static bool TryExtractFolderFromResourcesPath(string path, out string folder)
+        {
+            folder = null;
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var i = path.LastIndexOf('/');
+            if (i <= 0) return false;
+            folder = path.Substring(0, i);
+            return true;
+        }
+
         /// <summary>Load by Resources path (e.g. <c>Levels/level_02</c> for <c>Assets/Resources/Levels/level_02.json</c>).</summary>
         public void Reload(string resourcesPath)
         {
@@ -138,6 +203,9 @@ namespace Presentation
 
             LastDefinition = definition;
             LastSpec = definition.Board;
+            if (levelJson == null && TryParseLevelNumberFromResourcesPath(resourcesLevelPath, out var parsedLevel))
+                CurrentLevelNumber = parsedLevel;
+
             _session = new LevelObjectiveSession(definition.Orders) { LogCollectFlow = logTileCollectFlow };
             orderRackHud?.BindSession(_session);
             _collect.BindSession(_session);
@@ -221,6 +289,17 @@ namespace Presentation
             json = asset.text;
             sourceLabel = $"Resources/{resourcesLevelPath}";
             return !string.IsNullOrWhiteSpace(json);
+        }
+
+        static bool TryParseLevelNumberFromResourcesPath(string path, out int level)
+        {
+            level = 1;
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+            var m = Regex.Match(path, @"level_(\d+)\s*$", RegexOptions.IgnoreCase);
+            if (!m.Success)
+                return false;
+            return int.TryParse(m.Groups[1].Value, out level);
         }
     }
 }

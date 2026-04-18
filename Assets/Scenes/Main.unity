@@ -663,7 +663,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   levelJson: {fileID: 0}
-  resourcesLevelPath: Levels/level_10
+  resourcesLevelPath: Levels/level_1
+  numberedLevelsResourcesFolder: Levels
   boardRoot: {fileID: 346736263}
   tilePrefab: {fileID: 4487092798841758540, guid: 1a61fa5e0d510a6449e07a73c79d2ada, type: 3}
   tileIconLibrary: {fileID: 11400000, guid: 0b7a8f23691c94743b398b26c9d2ada5, type: 2}
@@ -1409,7 +1410,19 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 803954678}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls: []
+      m_Calls:
+      - m_Target: {fileID: 284299160}
+        m_TargetAssemblyTypeName: Presentation.GameFlowManager, Assembly-CSharp
+        m_MethodName: LoadNextLevel
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &803954678
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1912,7 +1925,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0, g: 0, b: 0, a: 0}
+  m_Color: {r: 0.93207544, g: 0.93207544, b: 0.93207544, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1

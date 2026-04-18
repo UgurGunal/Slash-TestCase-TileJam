@@ -27,6 +27,9 @@ namespace Presentation
         public GamePhase Phase { get; private set; } = GamePhase.Idle;
         public GameStatsSnapshot LastOutcomeStats { get; private set; }
 
+        /// <summary>1-based level index from the loader’s last Resources path (<c>level_N</c>); 0 if no loader.</summary>
+        public int CurrentLevelNumber => boardLoader != null ? boardLoader.CurrentLevelNumber : 0;
+
         void OnEnable()
         {
             if (boardLoader != null)
@@ -116,6 +119,30 @@ namespace Presentation
 
             SetEndPanels(win: false, lose: false);
             boardLoader.Reload();
+        }
+
+        /// <summary>
+        /// Closes end panels and loads <c>Resources/.../level_{N+1}</c> if it exists.
+        /// Wire to a “Next” button on the win panel. If there is no next file, logs a warning and leaves flow unchanged.
+        /// </summary>
+        public void LoadNextLevel()
+        {
+            if (boardLoader == null)
+            {
+                Debug.LogWarning("[GameFlowManager] LoadNextLevel: assign boardLoader.", this);
+                return;
+            }
+
+            SetEndPanels(win: false, lose: false);
+            boardLoader.TryLoadNextLevel();
+        }
+
+        /// <summary>True if <c>Resources/.../level_{Current+1}</c> exists (TextAsset mode always false).</summary>
+        public bool HasNextLevel()
+        {
+            if (boardLoader == null || !boardLoader.UsesNumberedResourcesLevels) return false;
+            var path = boardLoader.BuildNumberedLevelResourcesPathForIndex(boardLoader.CurrentLevelNumber + 1);
+            return Resources.Load<TextAsset>(path) != null;
         }
 
         /// <summary>Current progress while playing; default if no session.</summary>
