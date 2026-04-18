@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using DG.Tweening;
 using Gameplay;
@@ -53,6 +54,9 @@ namespace Presentation
         public LevelBoardSpec LastSpec { get; private set; }
         public LevelDefinition LastDefinition { get; private set; }
         public LevelObjectiveSession Session => _session;
+
+        /// <summary>Invoked after each successful <see cref="Reload"/> when a new <see cref="LevelObjectiveSession"/> is created and bound.</summary>
+        public event Action<LevelObjectiveSession> SessionAssigned;
 
         LevelBoardGrid _grid;
         BoardTileCollectCoordinator _collect;
@@ -135,6 +139,7 @@ namespace Presentation
             _session = new LevelObjectiveSession(definition.Orders) { LogCollectFlow = logTileCollectFlow };
             orderRackHud?.BindSession(_session);
             _collect.BindSession(_session);
+            SessionAssigned?.Invoke(_session);
             Debug.Log($"[LevelBoardLoader] Loaded from {source}\n{LevelGridParser.BuildValidationReport(definition.Board)}");
 
             _boardBuildGeneration++;

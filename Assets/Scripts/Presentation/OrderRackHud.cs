@@ -1,4 +1,5 @@
 using Core;
+using DG.Tweening;
 using Gameplay;
 using UnityEngine;
 using UnityEngine.UI;
@@ -9,6 +10,8 @@ namespace Presentation
     [System.Serializable]
     public sealed class OrderStripUi
     {
+        [Tooltip("Parent of this customer row: scales down/up when the order completes. If unset, the first icon’s parent RectTransform is used.")]
+        public RectTransform stripContainer;
         [Tooltip("One Image per icon in this order, left → right (same order as the JSON row for this customer).")]
         public Image[] iconImages;
     }
@@ -31,11 +34,21 @@ namespace Presentation
         [Tooltip("RGB multiplier for fulfilled order icons (1 = no dimming).")]
         [SerializeField] [Range(0.55f, 1f)] float fulfilledOrderIconTint = 0.78f;
 
+        [Header("Order complete feedback")]
+        [Tooltip("When a strip advances to the next customer, its container scales to 0 then back to normal with the new order.")]
+        [SerializeField] bool orderStripCompleteScaleAnimation = true;
+        [SerializeField] float orderStripCompleteScaleDownSec = 0.22f;
+        [SerializeField] Ease orderStripCompleteScaleDownEase = Ease.InQuad;
+        [SerializeField] float orderStripCompleteScaleUpSec = 0.28f;
+        [SerializeField] Ease orderStripCompleteScaleUpEase = Ease.OutBack;
+
         const string MatchedTickChildName = "OrderMatchedTick";
 
         LevelObjectiveSession _session;
         bool _loggedLayoutMismatch;
         bool _loggedStripVisibilityHints;
+        bool[] _stripSkipRefreshDuringRoll;
+        Vector3[] _stripContainerBaseScales;
 
         void OnEnable()
         {
@@ -98,18 +111,106 @@ namespace Presentation
             _loggedLayoutMismatch = false;
             _loggedStripVisibilityHints = false;
             if (_session != null)
+            {
                 _session.StateChanged += OnStateChanged;
+                _session.ActiveOrderStripAdvanced += OnActiveOrderStripAdvanced;
+            }
+
+            EnsureAnimScratch(GameConstants.ActiveOrderSlotsCount);
+            CacheStripContainerBaseScales();
             Refresh();
         }
 
         void Unbind()
         {
             if (_session != null)
+            {
                 _session.StateChanged -= OnStateChanged;
+                _session.ActiveOrderStripAdvanced -= OnActiveOrderStripAdvanced;
+            }
+
+            KillAllStripContainerTweens();
             _session = null;
         }
 
         void OnStateChanged() => Refresh();
+
+        void EnsureAnimScratch(int slotCount)
+        {
+            if (_stripSkipRefreshDuringRoll == null || _stripSkipRefreshDuringRoll.Length != slotCount)
+                _stripSkipRefreshDuringRoll = new bool[slotCount];
+            if (_stripContainerBaseScales == null || _stripContainerBaseScales.Length != slotCount)
+                _stripContainerBaseScales = new Vector3[slotCount];
+        }
+
+        void CacheStripContainerBaseScales()
+        {
+            var n = GameConstants.ActiveOrderSlotsCount;
+            EnsureAnimScratch(n);
+            for (var s = 0; s < n; s++)
+            {
+                var rt = ResolveStripContainer(s);
+                _stripContainerBaseScales[s] = rt != null ? rt.localScale : Vector3.one;
+            }
+        }
+
+        RectTransform ResolveStripContainer(int stripIndex)
+        {
+            if (orderStrips == null || stripIndex < 0 || stripIndex >= orderStrips.Length)
+                return null;
+            var row = orderStrips[stripIndex];
+            if (row.stripContainer != null)
+                return row.stripContainer;
+            var first = FirstNonNullImage(row.iconImages);
+            if (first == null)
+                return null;
+            var p = first.transform.parent;
+            return p != null ? p as RectTransform : first.rectTransform;
+        }
+
+        void KillAllStripContainerTweens()
+        {
+            var n = GameConstants.ActiveOrderSlotsCount;
+            for (var s = 0; s < n; s++)
+            {
+                var rt = ResolveStripContainer(s);
+                rt?.DOKill(false);
+            }
+        }
+
+        void OnActiveOrderStripAdvanced(int slot)
+        {
+            if (!orderStripCompleteScaleAnimation || _session == null)
+                return;
+
+            var rt = ResolveStripContainer(slot);
+            if (rt == null)
+                return;
+
+            var n = GameConstants.ActiveOrderSlotsCount;
+            EnsureAnimScratch(n);
+            if ((uint)slot >= (uint)n)
+                return;
+
+            rt.DOKill(false);
+            _stripSkipRefreshDuringRoll[slot] = false;
+            _stripSkipRefreshDuringRoll[slot] = true;
+            var baseScale = slot < _stripContainerBaseScales.Length ? _stripContainerBaseScales[slot] : Vector3.one;
+            rt.localScale = baseScale;
+
+            var stride = _session.MaxOrderIconsOnLevel;
+            var down = Mathf.Max(0.02f, orderStripCompleteScaleDownSec);
+            var up = Mathf.Max(0.02f, orderStripCompleteScaleUpSec);
+            rt
+                .DOScale(Vector3.zero, down)
+                .SetEase(orderStripCompleteScaleDownEase)
+                .OnComplete(() =>
+                {
+                    RefreshOrderStripFromSession(slot, stride);
+                    _stripSkipRefreshDuringRoll[slot] = false;
+                    rt.DOScale(baseScale, up).SetEase(orderStripCompleteScaleUpEase);
+                });
+        }
 
         void Refresh()
         {
@@ -117,50 +218,12 @@ namespace Presentation
 
             var stride = _session.MaxOrderIconsOnLevel;
             var slotCount = GameConstants.ActiveOrderSlotsCount;
+            EnsureAnimScratch(slotCount);
             for (var s = 0; s < slotCount; s++)
             {
-                var cells = orderStrips != null && s < orderStrips.Length ? orderStrips[s].iconImages : null;
-                for (var i = 0; i < stride; i++)
-                {
-                    if (!_session.GetActiveSlot(s, out _, out var order, out var fulfilled))
-                    {
-                        var imgIdle = cells != null && i < cells.Length ? cells[i] : null;
-                        if (imgIdle != null)
-                        {
-                            ClearOrderMatchedTick(imgIdle);
-                            imgIdle.enabled = false;
-                        }
-
-                        continue;
-                    }
-
-                    if (i >= order.Length)
-                    {
-                        var imgPad = cells != null && i < cells.Length ? cells[i] : null;
-                        if (imgPad != null)
-                        {
-                            ClearOrderMatchedTick(imgPad);
-                            imgPad.enabled = false;
-                        }
-
-                        continue;
-                    }
-
-                    var img = cells != null && i < cells.Length ? cells[i] : null;
-                    if (img == null)
-                    {
-                        LogLayoutMismatchOnce(
-                            $"Order strip {s} is missing an Image for icon index {i} (order length {order.Length}). " +
-                            $"Assign at least {stride} entries in that strip’s {nameof(OrderStripUi.iconImages)} (level max icons = {stride}).");
-                        continue;
-                    }
-
-                    img.enabled = true;
-                    var kind = order.GetIcon(i);
-                    var cellDone = fulfilled != null && i < fulfilled.Length && fulfilled[i];
-                    ApplySprite(img, kind, cellDone);
-                    UpdateOrderMatchedTick(img, cellDone && img.enabled);
-                }
+                if (s < _stripSkipRefreshDuringRoll.Length && _stripSkipRefreshDuringRoll[s])
+                    continue;
+                RefreshOrderStripFromSession(s, stride);
             }
 
             if (rackSlotImages == null || rackSlotImages.Length < GameConstants.RackCapacity)
@@ -184,6 +247,53 @@ namespace Presentation
             }
 
             DiagnoseStripVisibilityOnce();
+        }
+
+        void RefreshOrderStripFromSession(int s, int stride)
+        {
+            if (_session == null) return;
+            var cells = orderStrips != null && s < orderStrips.Length ? orderStrips[s].iconImages : null;
+            for (var i = 0; i < stride; i++)
+            {
+                if (!_session.GetActiveSlot(s, out _, out var order, out var fulfilled))
+                {
+                    var imgIdle = cells != null && i < cells.Length ? cells[i] : null;
+                    if (imgIdle != null)
+                    {
+                        ClearOrderMatchedTick(imgIdle);
+                        imgIdle.enabled = false;
+                    }
+
+                    continue;
+                }
+
+                if (i >= order.Length)
+                {
+                    var imgPad = cells != null && i < cells.Length ? cells[i] : null;
+                    if (imgPad != null)
+                    {
+                        ClearOrderMatchedTick(imgPad);
+                        imgPad.enabled = false;
+                    }
+
+                    continue;
+                }
+
+                var img = cells != null && i < cells.Length ? cells[i] : null;
+                if (img == null)
+                {
+                    LogLayoutMismatchOnce(
+                        $"Order strip {s} is missing an Image for icon index {i} (order length {order.Length}). " +
+                        $"Assign at least {stride} entries in that strip’s {nameof(OrderStripUi.iconImages)} (level max icons = {stride}).");
+                    continue;
+                }
+
+                img.enabled = true;
+                var kind = order.GetIcon(i);
+                var cellDone = fulfilled != null && i < fulfilled.Length && fulfilled[i];
+                ApplySprite(img, kind, cellDone);
+                UpdateOrderMatchedTick(img, cellDone && img.enabled);
+            }
         }
 
         /// <summary>

@@ -92,6 +92,9 @@ namespace Gameplay
 
         public event Action StateChanged;
 
+        /// <summary>Fired after UI strip <paramref name="slot"/> advances to the next level order (or idle). Session state is already updated.</summary>
+        public event Action<int> ActiveOrderStripAdvanced;
+
         public bool HasFailed => _failed;
         public bool HasWon => _completedOrders >= _orders.OrderCount;
         public int RackUsedCount => _rackCount;
@@ -373,6 +376,8 @@ namespace Gameplay
                 _slotOrderIndex[slot] = -1;
                 _slotCellFulfilled[slot] = null;
             }
+
+            ActiveOrderStripAdvanced?.Invoke(slot);
 
             if (_completedOrders >= _orders.OrderCount)
                 return TileCollectResult.LevelWon;
