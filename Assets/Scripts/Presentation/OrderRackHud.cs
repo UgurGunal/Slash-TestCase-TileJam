@@ -24,6 +24,14 @@ namespace Presentation
         [SerializeField] OrderStripUi[] orderStrips;
         [Tooltip("Six Images: rack slot 0 = first wrong tile collected, then 1…5. Empty slots stay hidden.")]
         [SerializeField] Image[] rackSlotImages;
+        [Tooltip("Optional: instantiated as a child of each fulfilled order icon (bottom-right). Removed when the slot is not fulfilled or the strip advances.")]
+        [SerializeField] GameObject matchedOrderTickPrefab;
+        [Tooltip("Anchored position inset from the icon’s bottom-right corner (x ≤ 0 moves left, y ≥ 0 moves up).")]
+        [SerializeField] Vector2 matchedTickAnchorOffset = new Vector2(-6f, 6f);
+        [Tooltip("RGB multiplier for fulfilled order icons (1 = no dimming).")]
+        [SerializeField] [Range(0.55f, 1f)] float fulfilledOrderIconTint = 0.78f;
+
+        const string MatchedTickChildName = "OrderMatchedTick";
 
         LevelObjectiveSession _session;
         bool _loggedLayoutMismatch;
@@ -75,6 +83,11 @@ namespace Presentation
                 Debug.LogWarning(
                     $"[OrderRackHud] {nameof(rackSlotImages)} has {rackSlotImages.Length} entries; assign {GameConstants.RackCapacity} so every rack tile is visible.",
                     this);
+
+            if (matchedOrderTickPrefab != null && matchedOrderTickPrefab.GetComponent<RectTransform>() == null)
+                Debug.LogWarning(
+                    $"[OrderRackHud] {nameof(matchedOrderTickPrefab)} root must have a RectTransform (UI prefab).",
+                    this);
         }
 #endif
 
@@ -113,7 +126,11 @@ namespace Presentation
                     {
                         var imgIdle = cells != null && i < cells.Length ? cells[i] : null;
                         if (imgIdle != null)
+                        {
+                            ClearOrderMatchedTick(imgIdle);
                             imgIdle.enabled = false;
+                        }
+
                         continue;
                     }
 
@@ -121,7 +138,11 @@ namespace Presentation
                     {
                         var imgPad = cells != null && i < cells.Length ? cells[i] : null;
                         if (imgPad != null)
+                        {
+                            ClearOrderMatchedTick(imgPad);
                             imgPad.enabled = false;
+                        }
+
                         continue;
                     }
 
@@ -138,6 +159,7 @@ namespace Presentation
                     var kind = order.GetIcon(i);
                     var cellDone = fulfilled != null && i < fulfilled.Length && fulfilled[i];
                     ApplySprite(img, kind, cellDone);
+                    UpdateOrderMatchedTick(img, cellDone && img.enabled);
                 }
             }
 
@@ -251,7 +273,57 @@ namespace Presentation
 
             img.sprite = sprite;
             img.enabled = sprite != null;
-            img.color = fulfilledDim ? new Color(0.45f, 0.45f, 0.45f, 1f) : Color.white;
+            img.color = fulfilledDim ? new Color(fulfilledOrderIconTint, fulfilledOrderIconTint, fulfilledOrderIconTint, 1f) : Color.white;
+        }
+
+        void UpdateOrderMatchedTick(Image icon, bool showMatched)
+        {
+            if (icon == null) return;
+            if (!showMatched || matchedOrderTickPrefab == null)
+            {
+                ClearOrderMatchedTick(icon);
+                return;
+            }
+
+            var parent = icon.rectTransform;
+            var existing = parent.Find(MatchedTickChildName);
+            if (existing != null)
+            {
+                existing.gameObject.SetActive(true);
+                LayoutMatchedTick(existing as RectTransform, parent);
+                existing.SetAsLastSibling();
+                return;
+            }
+
+            var tickGo = Instantiate(matchedOrderTickPrefab, parent);
+            tickGo.name = MatchedTickChildName;
+            if (!tickGo.TryGetComponent<RectTransform>(out var tickRt))
+            {
+                Destroy(tickGo);
+                return;
+            }
+
+            LayoutMatchedTick(tickRt, parent);
+            tickRt.SetAsLastSibling();
+        }
+
+        void LayoutMatchedTick(RectTransform tick, RectTransform iconRect)
+        {
+            if (tick == null) return;
+            tick.anchorMin = new Vector2(1f, 0f);
+            tick.anchorMax = new Vector2(1f, 0f);
+            tick.pivot = new Vector2(1f, 0f);
+            tick.anchoredPosition = matchedTickAnchorOffset;
+            tick.localRotation = Quaternion.identity;
+            tick.localScale = Vector3.one;
+        }
+
+        void ClearOrderMatchedTick(Image icon)
+        {
+            if (icon == null) return;
+            var t = icon.rectTransform.Find(MatchedTickChildName);
+            if (t != null)
+                Destroy(t.gameObject);
         }
     }
 }

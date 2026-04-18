@@ -390,6 +390,9 @@ MonoBehaviour:
   - {fileID: 81573001}
   - {fileID: 180610556}
   - {fileID: 311968350}
+  matchedOrderTickPrefab: {fileID: 6975682809935156055, guid: e1b51395ac688c340953c1e5f10b1421, type: 3}
+  matchedTickAnchorOffset: {x: -6, y: 6}
+  fulfilledOrderIconTint: 0.85
 --- !u!4 &296336691
 Transform:
   m_ObjectHideFlags: 0
@@ -553,6 +556,7 @@ MonoBehaviour:
   clearExistingChildren: 1
   loadOnAwake: 1
   orderRackHud: {fileID: 296336690}
+  logTileCollectFlow: 1
 --- !u!4 &434833059
 Transform:
   m_ObjectHideFlags: 0
@@ -1238,7 +1242,6 @@ GameObject:
   - component: {fileID: 959989889}
   - component: {fileID: 959989893}
   - component: {fileID: 959989892}
-  - component: {fileID: 959989891}
   - component: {fileID: 959989890}
   m_Layer: 5
   m_Name: Order1
@@ -1295,27 +1298,6 @@ MonoBehaviour:
   m_ChildScaleWidth: 0
   m_ChildScaleHeight: 0
   m_ReverseArrangement: 0
---- !u!114 &959989891
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 959989888}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 51d568fb32214144ea81591d9c8a04a1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  iconLibrary: {fileID: 11400000, guid: 0b7a8f23691c94743b398b26c9d2ada5, type: 2}
-  orderStrips: []
-  rackSlotImages:
-  - {fileID: 252792388}
-  - {fileID: 2060703924}
-  - {fileID: 816799021}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
 --- !u!114 &959989892
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1329,7 +1311,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0.40073332, g: 0.96981126, b: 0.75439763, a: 1}
+  m_Color: {r: 0.43854043, g: 0.554717, b: 0.51065004, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1519,7 +1501,6 @@ GameObject:
   - component: {fileID: 1612370092}
   - component: {fileID: 1612370096}
   - component: {fileID: 1612370095}
-  - component: {fileID: 1612370094}
   - component: {fileID: 1612370093}
   m_Layer: 5
   m_Name: Order2
@@ -1576,27 +1557,6 @@ MonoBehaviour:
   m_ChildScaleWidth: 0
   m_ChildScaleHeight: 0
   m_ReverseArrangement: 0
---- !u!114 &1612370094
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1612370091}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 51d568fb32214144ea81591d9c8a04a1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  iconLibrary: {fileID: 11400000, guid: 0b7a8f23691c94743b398b26c9d2ada5, type: 2}
-  orderStrips: []
-  rackSlotImages:
-  - {fileID: 1766039191}
-  - {fileID: 903871790}
-  - {fileID: 1724306537}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
 --- !u!114 &1612370095
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1610,7 +1570,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0.40073332, g: 0.96981126, b: 0.75439763, a: 1}
+  m_Color: {r: 0.4392157, g: 0.5568628, b: 0.5137255, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
