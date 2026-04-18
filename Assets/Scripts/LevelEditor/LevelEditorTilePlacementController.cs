@@ -15,7 +15,8 @@ namespace Presentation
 
     /// <summary>
     /// After <see cref="LevelEditorOrderAuthoringPanel"/> finalizes orders, the last tile in the last order column is shown in <see cref="handTileParent"/>.
-    /// Each click can send the tile to the <b>rack</b> (first empty slot under the pointer) or to the <b>grid</b> if the pointer is over the board.
+    /// Rack: an <b>empty</b> slot stores the hand tile (advances order queue). An <b>occupied</b> slot picks that tile into the hand; order hand goes back to its column; rack hand <b>swaps</b> into the clicked slot.
+    /// Advancing the hand removes the next order-column tile when available. If orders are empty but the rack still has tiles, placement continues with an empty hand until you pick from the rack. Exits to order authoring only when both queue and rack are done.
     /// Grid: half-cell placement lattice (2W−1)×(2H−1) slots; layer 0 on empty board; Chebyshev |Δ|≤1 in slot indices for stacking.
     /// </summary>
     [DisallowMultipleComponent]
@@ -45,6 +46,12 @@ namespace Presentation
         TileKind?[] _rackSlots;
         BoardTileView[] _rackTileViews;
         readonly Dictionary<(int x, int y, int z), BoardTileView> _tileViews = new Dictionary<(int x, int y, int z), BoardTileView>();
+
+        /// <summary>True when the hand shows a tile taken from the rack (grid/rack placement does not consume the order queue).</summary>
+        bool _handFromRack;
+
+        /// <summary>Order column index (0 = leftmost) for the current hand tile when it came from <see cref="LevelEditorOrderAuthoringPanel"/>; used to return a tile to the same customer when picking from the rack.</summary>
+        int _handOrderColumnIndex = -1;
 
         public LevelEditorAuthoringPhase Phase => _phase;
 
@@ -81,7 +88,10 @@ namespace Presentation
 
         void Update()
         {
-            if (_phase != LevelEditorAuthoringPhase.PlacingTilesFromOrders || _handKind == TileKind.None)
+            if (_phase != LevelEditorAuthoringPhase.PlacingTilesFromOrders)
+                return;
+            // Allow input with an empty hand while the rack still has tiles (orders finished; pick from rack to place on grid).
+            if (_handKind == TileKind.None && !RackHasAnyTile())
                 return;
             if (orderPanel != null && !orderPanel.OrdersAuthoringFinalized)
             {
@@ -98,7 +108,10 @@ namespace Presentation
             var canvas = canvasOverride != null ? canvasOverride : GetComponentInParent<Canvas>();
             var cam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
 
-            if (TryPlaceOnRackIfClicked(canvas, cam))
+            if (TryHandleRackClick(canvas, cam))
+                return;
+
+            if (_handKind == TileKind.None)
                 return;
 
             if (grid == null || boardTilesRoot == null)
@@ -140,32 +153,68 @@ namespace Presentation
             AdvanceHandAfterSuccessfulPlacement();
         }
 
-        bool TryPlaceOnRackIfClicked(Canvas canvas, Camera cam)
+        bool TryHandleRackClick(Canvas canvas, Camera cam)
         {
             if (_rackSlots == null || editorRackSlotRects == null || editorRackSlotRects.Length == 0)
                 return false;
-            if (!RackHasEmptySlot())
-                return false;
             if (!TryGetRackSlotUnderPointer(canvas, cam, out var slot))
                 return false;
+
             if (_rackSlots[slot].HasValue)
+            {
+                PickHandFromOccupiedRackSlot(slot);
                 return true;
+            }
+
+            if (_handKind == TileKind.None)
+                return false;
+
+            if (_handFromRack)
+            {
+                PlaceTileInRack(slot, _handKind);
+                AdvanceHandAfterSuccessfulPlacement();
+                return true;
+            }
 
             PlaceTileInRack(slot, _handKind);
             AdvanceHandAfterSuccessfulPlacement();
             return true;
         }
 
-        bool RackHasEmptySlot()
+        /// <summary>Occupied rack slot: take its tile into the hand. Order hand → previous tile returns to its order column. Rack hand → <b>swap</b>: previous hand tile fills the <i>clicked</i> slot (same slot as the tile you picked up).</summary>
+        void PickHandFromOccupiedRackSlot(int slot)
         {
-            if (_rackSlots == null) return false;
-            for (var i = 0; i < _rackSlots.Length; i++)
+            if (_rackSlots == null || !_rackSlots[slot].HasValue) return;
+
+            var taken = _rackSlots[slot].Value;
+            var previousHand = _handKind;
+            var previousFromRack = _handFromRack;
+            ClearRackSlotAt(slot);
+
+            if (!previousFromRack && previousHand != TileKind.None && orderPanel != null && _handOrderColumnIndex >= 0)
+                orderPanel.AppendTileToOrderColumnIndex(_handOrderColumnIndex, previousHand);
+
+            if (previousFromRack && previousHand != TileKind.None &&
+                editorRackSlotRects != null && slot >= 0 && slot < editorRackSlotRects.Length &&
+                editorRackSlotRects[slot] != null)
+                PlaceTileInRack(slot, previousHand);
+
+            _handKind = taken;
+            _handFromRack = true;
+            _handOrderColumnIndex = -1;
+            RebuildHandVisual();
+        }
+
+        void ClearRackSlotAt(int slot)
+        {
+            if (_rackTileViews != null && slot >= 0 && slot < _rackTileViews.Length && _rackTileViews[slot] != null)
             {
-                if (!_rackSlots[i].HasValue)
-                    return true;
+                Destroy(_rackTileViews[slot].gameObject);
+                _rackTileViews[slot] = null;
             }
 
-            return false;
+            if (_rackSlots != null && slot >= 0 && slot < _rackSlots.Length)
+                _rackSlots[slot] = null;
         }
 
         bool TryGetRackSlotUnderPointer(Canvas canvas, Camera cam, out int slotIndex)
@@ -189,6 +238,7 @@ namespace Presentation
 
         void PlaceTileInRack(int slotIndex, TileKind kind)
         {
+            ClearRackSlotAt(slotIndex);
             _rackSlots[slotIndex] = kind;
             var parent = editorRackSlotRects[slotIndex];
             var view = Instantiate(tilePrefab, parent, false);
@@ -249,24 +299,39 @@ namespace Presentation
 
         void AdvanceHandAfterSuccessfulPlacement()
         {
-            if (orderPanel == null || !orderPanel.TryConsumeLastTileFromOrdersForPlacement(out _))
+            _handFromRack = false;
+            if (orderPanel == null ||
+                !orderPanel.TryConsumeLastTileFromOrdersForPlacement(out var removed, out var sourceCol) ||
+                removed == TileKind.None)
             {
-                Debug.LogWarning("[LevelEditorTilePlacementController] Could not remove placed tile from order data.");
+                if (RackHasAnyTile())
+                {
+                    ClearHandViewOnly();
+                    _handKind = TileKind.None;
+                    _handOrderColumnIndex = -1;
+                    return;
+                }
+
                 ClearHand();
                 _phase = LevelEditorAuthoringPhase.OrderCreation;
                 return;
             }
 
-            if (orderPanel.TryGetLastTileOfLastOrder(out var nextHand) && nextHand != TileKind.None)
+            _handKind = removed;
+            _handOrderColumnIndex = sourceCol;
+            RebuildHandVisual();
+        }
+
+        bool RackHasAnyTile()
+        {
+            if (_rackSlots == null) return false;
+            for (var i = 0; i < _rackSlots.Length; i++)
             {
-                _handKind = nextHand;
-                RebuildHandVisual();
+                if (_rackSlots[i].HasValue)
+                    return true;
             }
-            else
-            {
-                ClearHand();
-                _phase = LevelEditorAuthoringPhase.OrderCreation;
-            }
+
+            return false;
         }
 
         void EnterPlacementFromOrders()
@@ -283,6 +348,13 @@ namespace Presentation
                 return;
             }
 
+            if (!orderPanel.TryConsumeLastTileFromOrdersForPlacement(out var consumed, out var sourceCol) ||
+                consumed != kind)
+            {
+                Debug.LogWarning("[LevelEditorTilePlacementController] Could not reserve hand tile from order column.");
+                return;
+            }
+
             LevelEditorGridLinesView.GetPlacementSlotCounts(grid.GridWidthCells, grid.GridHeightCells, out var pw, out var ph);
             var d = Mathf.Max(1, maxBoardDepth);
             _cells = new TileKind?[pw, ph, d];
@@ -293,6 +365,8 @@ namespace Presentation
             _rackTileViews = new BoardTileView[GameConstants.RackCapacity];
 
             _handKind = kind;
+            _handOrderColumnIndex = sourceCol;
+            _handFromRack = false;
             _phase = LevelEditorAuthoringPhase.PlacingTilesFromOrders;
             RebuildHandVisual();
         }
@@ -300,6 +374,8 @@ namespace Presentation
         void ExitPlacement()
         {
             _phase = LevelEditorAuthoringPhase.OrderCreation;
+            _handFromRack = false;
+            _handOrderColumnIndex = -1;
             _handKind = TileKind.None;
             ClearHandViewOnly();
             _cells = null;
@@ -392,6 +468,8 @@ namespace Presentation
 
         void ClearHand()
         {
+            _handFromRack = false;
+            _handOrderColumnIndex = -1;
             _handKind = TileKind.None;
             ClearHandViewOnly();
         }

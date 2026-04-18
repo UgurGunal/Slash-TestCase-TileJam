@@ -386,16 +386,18 @@ namespace Presentation
         }
 
         /// <summary>
-        /// Removes the last tile from the rightmost non-empty order column (the one just placed on the board).
-        /// Call after each successful grid placement so the new “last” tile becomes the next hand tile.
+        /// Removes the last tile from the rightmost non-empty order column — when it becomes the hand tile (placement phase) or when advancing the hand after a place/rack action.
+        /// <paramref name="sourceOrderColumnIndex"/> is the column index (0 = leftmost order) <i>before</i> removal, so returned tiles can be put back on the same customer order.
         /// </summary>
-        public bool TryConsumeLastTileFromOrdersForPlacement(out TileKind removed)
+        public bool TryConsumeLastTileFromOrdersForPlacement(out TileKind removed, out int sourceOrderColumnIndex)
         {
             removed = TileKind.None;
+            sourceOrderColumnIndex = -1;
             for (var c = _orderColumns.Count - 1; c >= 0; c--)
             {
                 var col = _orderColumns[c];
                 if (col == null || col.Count == 0) continue;
+                sourceOrderColumnIndex = c;
                 removed = col[col.Count - 1];
                 col.RemoveAt(col.Count - 1);
                 while (_orderColumns.Count > 1 && _orderColumns[_orderColumns.Count - 1].Count == 0)
@@ -407,6 +409,20 @@ namespace Presentation
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Appends a tile to the end of the order column at <paramref name="orderColumnIndex"/> (left-to-right customer index). Inserts empty columns if needed so the index is valid.
+        /// </summary>
+        public void AppendTileToOrderColumnIndex(int orderColumnIndex, TileKind kind)
+        {
+            if (kind == TileKind.None || orderColumnIndex < 0) return;
+            EnsureAtLeastOneColumn();
+            while (_orderColumns.Count <= orderColumnIndex)
+                _orderColumns.Add(new List<TileKind>());
+            _orderColumns[orderColumnIndex].Add(kind);
+            RebuildOrderColumnsVisuals();
+            onDraftChanged?.Invoke();
         }
 
         public string GetDraftAsOrderTextEntry()
