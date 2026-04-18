@@ -16,6 +16,7 @@ namespace Presentation
     /// <summary>
     /// After <see cref="LevelEditorOrderAuthoringPanel"/> finalizes orders, the last tile in the last order column is shown in <see cref="handTileParent"/>.
     /// Rack: an <b>empty</b> slot stores the hand tile (advances order queue). An <b>occupied</b> slot picks that tile into the hand; order hand goes back to its column; rack hand <b>swaps</b> into the clicked slot.
+    /// Active (green) order tiles: click takes that cell’s tile as the new hand; the previous hand returns to the order column or rack slot it came from.
     /// Advancing the hand removes the next order-column tile when available. If orders are empty but the rack still has tiles, placement continues with an empty hand until you pick from the rack. Exits to order authoring only when both queue and rack are done.
     /// Grid: half-cell placement lattice (2W−1)×(2H−1) slots; layer 0 on empty board; Chebyshev |Δ|≤1 in slot indices for stacking.
     /// </summary>
@@ -53,6 +54,9 @@ namespace Presentation
         /// <summary>Order column index (0 = leftmost) for the current hand tile when it came from <see cref="LevelEditorOrderAuthoringPanel"/>; used to return a tile to the same customer when picking from the rack.</summary>
         int _handOrderColumnIndex = -1;
 
+        /// <summary>Rack slot index the current hand tile was taken from when <see cref="_handFromRack"/> is true; used to return the tile when switching the active order pick.</summary>
+        int _handRackSlotIndex = -1;
+
         public LevelEditorAuthoringPhase Phase => _phase;
 
         void OnEnable()
@@ -61,6 +65,7 @@ namespace Presentation
             {
                 orderPanel.OnOrdersAuthoringFinalized += EnterPlacementFromOrders;
                 orderPanel.OnOrdersAuthoringUnlocked += ExitPlacement;
+                orderPanel.OnActiveOrderTileClickedForPlacement += HandleActiveOrderTileClicked;
             }
         }
 
@@ -70,7 +75,35 @@ namespace Presentation
             {
                 orderPanel.OnOrdersAuthoringFinalized -= EnterPlacementFromOrders;
                 orderPanel.OnOrdersAuthoringUnlocked -= ExitPlacement;
+                orderPanel.OnActiveOrderTileClickedForPlacement -= HandleActiveOrderTileClicked;
             }
+        }
+
+        void HandleActiveOrderTileClicked(int columnIndex, int tileIndex)
+        {
+            if (_phase != LevelEditorAuthoringPhase.PlacingTilesFromOrders || _handKind == TileKind.None || orderPanel == null)
+                return;
+
+            var prevHand = _handKind;
+            var prevFromRack = _handFromRack;
+            var sourceOrderCol = _handOrderColumnIndex;
+            var sourceRackSlot = _handRackSlotIndex;
+
+            if (!orderPanel.TryTakeActiveOrderTileToHand(columnIndex, tileIndex, out var taken))
+                return;
+
+            if (!prevFromRack && sourceOrderCol >= 0)
+                orderPanel.AppendTileToOrderColumnIndex(sourceOrderCol, prevHand);
+            else if (prevFromRack && sourceRackSlot >= 0 && sourceRackSlot < GameConstants.RackCapacity &&
+                     editorRackSlotRects != null && sourceRackSlot < editorRackSlotRects.Length &&
+                     editorRackSlotRects[sourceRackSlot] != null)
+                PlaceTileInRack(sourceRackSlot, prevHand);
+
+            _handKind = taken;
+            _handFromRack = false;
+            _handOrderColumnIndex = columnIndex;
+            _handRackSlotIndex = -1;
+            RebuildHandVisual();
         }
 
 #if UNITY_EDITOR
@@ -202,6 +235,7 @@ namespace Presentation
             _handKind = taken;
             _handFromRack = true;
             _handOrderColumnIndex = -1;
+            _handRackSlotIndex = slot;
             RebuildHandVisual();
         }
 
@@ -300,6 +334,7 @@ namespace Presentation
         void AdvanceHandAfterSuccessfulPlacement()
         {
             _handFromRack = false;
+            _handRackSlotIndex = -1;
             if (orderPanel == null ||
                 !orderPanel.TryConsumeLastTileFromOrdersForPlacement(out var removed, out var sourceCol) ||
                 removed == TileKind.None)
@@ -367,6 +402,7 @@ namespace Presentation
             _handKind = kind;
             _handOrderColumnIndex = sourceCol;
             _handFromRack = false;
+            _handRackSlotIndex = -1;
             _phase = LevelEditorAuthoringPhase.PlacingTilesFromOrders;
             RebuildHandVisual();
         }
@@ -376,6 +412,7 @@ namespace Presentation
             _phase = LevelEditorAuthoringPhase.OrderCreation;
             _handFromRack = false;
             _handOrderColumnIndex = -1;
+            _handRackSlotIndex = -1;
             _handKind = TileKind.None;
             ClearHandViewOnly();
             _cells = null;
@@ -470,6 +507,7 @@ namespace Presentation
         {
             _handFromRack = false;
             _handOrderColumnIndex = -1;
+            _handRackSlotIndex = -1;
             _handKind = TileKind.None;
             ClearHandViewOnly();
         }

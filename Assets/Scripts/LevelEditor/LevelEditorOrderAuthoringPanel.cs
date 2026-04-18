@@ -21,7 +21,7 @@ namespace Presentation
 
     /// <summary>
     /// Level editor UI: palette picks tile kinds; orders live in one panel — columns left-to-right, tiles top-to-bottom
-    /// per column. After finalize, the <b>two rightmost non-empty</b> columns are “active” (slight green tint) until they empty.
+    /// per column. After finalize, the <b>two rightmost non-empty</b> columns are “active” (slight green tint). During placement, green tiles are clickable to swap with the hand (<see cref="OnActiveOrderTileClickedForPlacement"/>).
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
@@ -143,6 +143,9 @@ namespace Presentation
 
         /// <summary>Invoked when authoring is unlocked or orders are cleared.</summary>
         public event Action OnOrdersAuthoringUnlocked;
+
+        /// <summary>After finalize, during tile placement: user clicked a tile in an active (green) order column. Args: column index, tile index in that column.</summary>
+        public event Action<int, int> OnActiveOrderTileClickedForPlacement;
 
         void OnEnable()
         {
@@ -430,6 +433,29 @@ namespace Presentation
             onDraftChanged?.Invoke();
         }
 
+        /// <summary>
+        /// Removes the tile at (<paramref name="columnIndex"/>, <paramref name="tileIndex"/>) from the draft and returns it as <paramref name="takenFromCell"/>.
+        /// Only allowed for <b>active</b> (green) order columns. The caller returns the previous hand tile to its own source column or rack slot.
+        /// </summary>
+        public bool TryTakeActiveOrderTileToHand(int columnIndex, int tileIndex, out TileKind takenFromCell)
+        {
+            takenFromCell = TileKind.None;
+            if (!_ordersAuthoringFinalized) return false;
+            RecomputeActiveOrderColumnIndicesForHighlight();
+            if (!_activeOrderColumnIndicesScratch.Contains(columnIndex)) return false;
+            if ((uint)columnIndex >= (uint)_orderColumns.Count) return false;
+            var col = _orderColumns[columnIndex];
+            if (col == null || (uint)tileIndex >= (uint)col.Count) return false;
+            takenFromCell = col[tileIndex];
+            col.RemoveAt(tileIndex);
+            while (_orderColumns.Count > 1 && _orderColumns[_orderColumns.Count - 1].Count == 0)
+                _orderColumns.RemoveAt(_orderColumns.Count - 1);
+            EnsureAtLeastOneColumn();
+            RebuildOrderColumnsVisuals();
+            onDraftChanged?.Invoke();
+            return takenFromCell != TileKind.None;
+        }
+
         public string GetDraftAsOrderTextEntry()
         {
             EnsureAtLeastOneColumn();
@@ -548,6 +574,12 @@ namespace Presentation
                         var c = ci;
                         var t = ti;
                         tile.SetClickHandler(_ => RemoveTileAt(c, t));
+                    }
+                    else if (_ordersAuthoringFinalized && _activeOrderColumnIndicesScratch.Contains(ci))
+                    {
+                        var c = ci;
+                        var t = ti;
+                        tile.SetClickHandler(_ => OnActiveOrderTileClickedForPlacement?.Invoke(c, t));
                     }
                     else
                         tile.SetClickHandler(null);
