@@ -1,3 +1,4 @@
+using DG.Tweening;
 using Gameplay;
 using LevelData;
 using UnityEngine;
@@ -34,6 +35,13 @@ namespace Presentation
         [SerializeField] TileCollectFly collectFly;
         [Tooltip("Log each tile click: order match vs rack, strip indices, and automatic rack→order matches.")]
         [SerializeField] bool logTileCollectFlow;
+
+        [Header("Tile spawn intro")]
+        [Tooltip("On load, scale tiles from 0 → 1 with DOTween; same layer starts together, next layer delayed by the stagger.")]
+        [SerializeField] bool tileSpawnScaleIn = true;
+        [SerializeField] float tileSpawnLayerStaggerSec = 0.2f;
+        [SerializeField] float tileSpawnScaleDurationSec = 0.28f;
+        [SerializeField] Ease tileSpawnScaleEase = Ease.OutBack;
 
         public LevelBoardSpec LastSpec { get; private set; }
         public LevelDefinition LastDefinition { get; private set; }
@@ -127,7 +135,17 @@ namespace Presentation
                     Destroy(boardRoot.GetChild(i).gameObject);
             }
 
-            _grid.BuildFromSpec(definition.Board, tilePrefab, visualLayout, tileIconLibrary, OnTileClicked);
+            var spawnIntro = tileSpawnScaleIn
+                ? new TileSpawnIntroConfig
+                {
+                    Enabled = true,
+                    LayerStaggerSeconds = tileSpawnLayerStaggerSec,
+                    ScaleDurationSeconds = tileSpawnScaleDurationSec,
+                    ScaleEase = tileSpawnScaleEase
+                }
+                : TileSpawnIntroConfig.Disabled;
+
+            _grid.BuildFromSpec(definition.Board, tilePrefab, visualLayout, tileIconLibrary, OnTileClicked, spawnIntro);
         }
 
         void OnTileClicked(BoardTileView view) => _collect?.HandleTileClicked(view);

@@ -1,11 +1,23 @@
 using System;
 using System.Collections.Generic;
 using Core;
+using DG.Tweening;
 using LevelData;
 using UnityEngine;
 
 namespace Presentation
 {
+    /// <summary>DOTween scale-in when the board is built; layers start with <see cref="LayerStaggerSeconds"/> between them.</summary>
+    public struct TileSpawnIntroConfig
+    {
+        public bool Enabled;
+        public float LayerStaggerSeconds;
+        public float ScaleDurationSeconds;
+        public Ease ScaleEase;
+
+        public static TileSpawnIntroConfig Disabled => default;
+    }
+
     /// <summary>
     /// Board grid state (<see cref="PlayableBoardState"/>) and live <see cref="BoardTileView"/> instances.
     /// Spawning and clickability visuals only — no match/session rules.
@@ -26,7 +38,8 @@ namespace Presentation
             BoardTileView tilePrefab,
             LevelBoardVisualLayoutSettings visualLayoutOrNull,
             TileIconLibrary tileIconLibrary,
-            Action<BoardTileView> onTileClicked)
+            Action<BoardTileView> onTileClicked,
+            TileSpawnIntroConfig tileSpawnIntro = default)
         {
             if (spec == null) throw new ArgumentNullException(nameof(spec));
             if (tilePrefab == null) throw new ArgumentNullException(nameof(tilePrefab));
@@ -52,9 +65,23 @@ namespace Presentation
                 view.Bind(kind, x, y, l, pos, cell, tileScale, tileIconLibrary);
                 view.SetClickHandler(onTileClicked);
                 _tiles[(x, y, l)] = view;
+
+                if (tileSpawnIntro.Enabled)
+                    PlayTileSpawnScaleIn(view, l, tileSpawnIntro);
             }
 
             RefreshClickabilityVisuals();
+        }
+
+        static void PlayTileSpawnScaleIn(BoardTileView view, int layerIndex, TileSpawnIntroConfig cfg)
+        {
+            if (view == null) return;
+            var rt = (RectTransform)view.transform;
+            rt.DOKill(false);
+            rt.localScale = Vector3.zero;
+            var delay = Mathf.Max(0f, layerIndex) * Mathf.Max(0f, cfg.LayerStaggerSeconds);
+            var dur = Mathf.Max(0.02f, cfg.ScaleDurationSeconds);
+            rt.DOScale(1f, dur).SetEase(cfg.ScaleEase).SetDelay(delay);
         }
 
         /// <summary>Clears logical cell and removes the view from the map; does not destroy the view (board fly handles that).</summary>
