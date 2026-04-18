@@ -2,7 +2,10 @@ using Core;
 
 namespace LevelData
 {
-    /// <summary>Which tiles can be removed: blocked if any tile sits in the 8-neighbourhood (or same cell) on <c>layer + 1</c>.</summary>
+    /// <summary>
+    /// Which tiles can be removed: blocked if <b>any</b> tile exists in the 8-neighbourhood (|Δx|≤1, |Δy|≤1, including same cell)
+    /// on <b>any</b> layer strictly above this tile (not only the layer immediately above).
+    /// </summary>
     public static class TileClickability
     {
         public static bool IsClickable(PlayableBoardState board, int x, int y, int layer)
@@ -10,14 +13,16 @@ namespace LevelData
             if (board == null || !board.HasTile(x, y, layer)) return false;
             if (layer >= board.Depth - 1) return true;
 
-            var above = layer + 1;
-            for (var dy = -1; dy <= 1; dy++)
-            for (var dx = -1; dx <= 1; dx++)
+            for (var lz = layer + 1; lz < board.Depth; lz++)
             {
-                var nx = x + dx;
-                var ny = y + dy;
-                if ((uint)nx >= (uint)board.Width || (uint)ny >= (uint)board.Height) continue;
-                if (board.HasTile(nx, ny, above)) return false;
+                for (var dy = -1; dy <= 1; dy++)
+                for (var dx = -1; dx <= 1; dx++)
+                {
+                    var nx = x + dx;
+                    var ny = y + dy;
+                    if ((uint)nx >= (uint)board.Width || (uint)ny >= (uint)board.Height) continue;
+                    if (board.HasTile(nx, ny, lz)) return false;
+                }
             }
 
             return true;
@@ -34,14 +39,16 @@ namespace LevelData
                 return false;
             if (layer >= d - 1) return true;
 
-            var above = layer + 1;
-            for (var dy = -1; dy <= 1; dy++)
-            for (var dx = -1; dx <= 1; dx++)
+            for (var lz = layer + 1; lz < d; lz++)
             {
-                var nx = x + dx;
-                var ny = y + dy;
-                if ((uint)nx >= (uint)w || (uint)ny >= (uint)h) continue;
-                if (cells[nx, ny, above].HasValue) return false;
+                for (var dy = -1; dy <= 1; dy++)
+                for (var dx = -1; dx <= 1; dx++)
+                {
+                    var nx = x + dx;
+                    var ny = y + dy;
+                    if ((uint)nx >= (uint)w || (uint)ny >= (uint)h) continue;
+                    if (cells[nx, ny, lz].HasValue) return false;
+                }
             }
 
             return true;

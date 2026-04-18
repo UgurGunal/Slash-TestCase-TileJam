@@ -357,6 +357,8 @@ namespace Presentation
             _ordersSnapshotAtFinalize = null;
             _orderColumns.Clear();
             _orderColumns.Add(new List<TileKind>());
+            if (orderAreaScroll != null)
+                orderAreaScroll.horizontalNormalizedPosition = 0f;
             _rebuildQueued = true;
             onFinalizedOrdersChanged?.Invoke();
             onDraftChanged?.Invoke();

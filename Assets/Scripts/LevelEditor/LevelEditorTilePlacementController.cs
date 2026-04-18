@@ -62,6 +62,16 @@ namespace Presentation
         public LevelEditorAuthoringPhase Phase => _phase;
 
         /// <summary>
+        /// Clears order authoring (columns, finalize state, export snapshot), board placement, rack, and hand — same data as a fresh scene load, without reloading the scene.
+        /// </summary>
+        public void ResetLevelEditor()
+        {
+            if (orderPanel != null)
+                orderPanel.ClearFinalizedOrders();
+            ExitPlacement();
+        }
+
+        /// <summary>
         /// Builds validated level JSON (same shape as <see cref="LevelGridParser"/>). Requires all tiles on the board,
         /// empty hand, empty rack, and empty order queue; customer groupings come from the snapshot taken at finalize.
         /// </summary>
