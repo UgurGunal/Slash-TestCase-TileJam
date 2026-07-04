@@ -63,7 +63,7 @@ namespace Gameplay
         public bool GetActiveSlot(int slot, out int levelOrderIndex, out OrderSpec orderSpec, out bool[] cellsFulfilled) =>
             _orderSlots.GetActiveSlot(slot, out levelOrderIndex, out orderSpec, out cellsFulfilled);
 
-        public bool IsSlotIdle(int slot) => _orderSlots.IsSlotIdle(int slot);
+        public bool IsSlotIdle(int slot) => _orderSlots.IsSlotIdle(slot);
 
         public void NotifyStateChanged() => RaiseStateChanged();
 
