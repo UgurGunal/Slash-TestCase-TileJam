@@ -555,6 +555,7 @@ GameObject:
   m_Component:
   - component: {fileID: 296336691}
   - component: {fileID: 296336690}
+  - component: {fileID: 296336692}
   m_Layer: 0
   m_Name: OrderRackManager
   m_TagString: Untagged
@@ -601,6 +602,25 @@ MonoBehaviour:
   orderStripCompleteScaleDownEase: 5
   orderStripCompleteScaleUpSec: 0.2
   orderStripCompleteScaleUpEase: 27
+--- !u!114 &296336692
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 296336689}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b38bfdd44ec5488a9e0f1a2b3c4d5e6f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  stripPrefab: {fileID: 100003, guid: c1d2e3f4a5b64789a0b1c2d3e4f5a6b7, type: 3}
+  stripContainer: {fileID: 791422575}
+  rackBarPrefab: {fileID: 200003, guid: d2e3f4a5b6c74890b1c2d3e4f5a6b7c8, type: 3}
+  rackBarContainer: {fileID: 526848380}
+  activeOrderSlotCount: 2
+  hud: {fileID: 296336690}
+  buildOnAwake: 0
 --- !u!4 &296336691
 Transform:
   m_ObjectHideFlags: 0
