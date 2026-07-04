@@ -45,6 +45,7 @@ namespace Presentation
         const string MatchedTickChildName = "OrderMatchedTick";
 
         LevelObjectiveSession _session;
+        IGameplayEventBus _eventBus;
         bool _loggedLayoutMismatch;
         bool _loggedStripVisibilityHints;
         bool[] _stripSkipRefreshDuringRoll;
@@ -104,16 +105,19 @@ namespace Presentation
         }
 #endif
 
-        public void BindSession(LevelObjectiveSession session)
+        public void BindSession(LevelObjectiveSession session, IGameplayEventBus eventBus)
         {
             Unbind();
             _session = session;
+            _eventBus = eventBus;
             _loggedLayoutMismatch = false;
             _loggedStripVisibilityHints = false;
-            if (_session != null)
+            if (_eventBus != null)
             {
-                _session.StateChanged += OnStateChanged;
-                _session.ActiveOrderSlotAdvanced += OnActiveOrderSlotAdvanced;
+                _eventBus.Subscribe<TileMatchedOrderEvent>(OnGameplayRefresh);
+                _eventBus.Subscribe<TileSentToRackEvent>(OnGameplayRefreshRack);
+                _eventBus.Subscribe<OrderCompletedEvent>(OnGameplayRefreshCompleted);
+                _eventBus.Subscribe<OrderSlotAdvancedEvent>(OnOrderSlotAdvancedFromBus);
             }
 
             EnsureAnimScratch(GameConstants.ActiveOrderSlotsCount);
@@ -121,19 +125,28 @@ namespace Presentation
             Refresh();
         }
 
+        void OnGameplayRefresh(TileMatchedOrderEvent _) => Refresh();
+
+        void OnGameplayRefreshRack(TileSentToRackEvent _) => Refresh();
+
+        void OnGameplayRefreshCompleted(OrderCompletedEvent _) => Refresh();
+
+        void OnOrderSlotAdvancedFromBus(OrderSlotAdvancedEvent e) => OnActiveOrderSlotAdvanced(e.SlotIndex);
+
         void Unbind()
         {
-            if (_session != null)
+            if (_eventBus != null)
             {
-                _session.StateChanged -= OnStateChanged;
-                _session.ActiveOrderSlotAdvanced -= OnActiveOrderSlotAdvanced;
+                _eventBus.Unsubscribe<TileMatchedOrderEvent>(OnGameplayRefresh);
+                _eventBus.Unsubscribe<TileSentToRackEvent>(OnGameplayRefreshRack);
+                _eventBus.Unsubscribe<OrderCompletedEvent>(OnGameplayRefreshCompleted);
+                _eventBus.Unsubscribe<OrderSlotAdvancedEvent>(OnOrderSlotAdvancedFromBus);
             }
 
             KillAllStripContainerTweens();
+            _eventBus = null;
             _session = null;
         }
-
-        void OnStateChanged() => Refresh();
 
         void EnsureAnimScratch(int slotCount)
         {

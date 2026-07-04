@@ -6,7 +6,7 @@ namespace Presentation
 {
     /// <summary>
     /// Tracks high-level outcome (playing / won / lost), keeps last stats snapshot, and toggles win vs lose UI.
-    /// Wire <see cref="winPanel"/> / <see cref="losePanel"/> to your Canvas overlay objects.
+    /// Subscribes to <see cref="IGameplayEventBus"/> for victory and rack-full outcomes.
     /// </summary>
     public sealed class GameFlowManager : MonoBehaviour
     {
@@ -22,12 +22,12 @@ namespace Presentation
         [SerializeField] bool hidePanelsOnNewLevel = true;
 
         LevelObjectiveSession _session;
+        IGameplayEventBus _eventBus;
         bool _outcomeHandled;
 
         public GamePhase Phase { get; private set; } = GamePhase.Idle;
         public GameStatsSnapshot LastOutcomeStats { get; private set; }
 
-        /// <summary>1-based level index from the loader’s last Resources path (<c>level_N</c>); 0 if no loader.</summary>
         public int CurrentLevelNumber => boardLoader != null ? boardLoader.CurrentLevelNumber : 0;
 
         void OnEnable()
@@ -40,7 +40,7 @@ namespace Presentation
         {
             if (boardLoader != null)
                 boardLoader.SessionAssigned -= OnSessionAssigned;
-            UnhookSession();
+            Unhook();
         }
 
         void Start()
@@ -57,44 +57,50 @@ namespace Presentation
 
         void OnSessionAssigned(LevelObjectiveSession session)
         {
-            UnhookSession();
+            Unhook();
             _session = session;
+            _eventBus = boardLoader != null ? boardLoader.GameplayEventBus : null;
             _outcomeHandled = false;
             Phase = session != null ? GamePhase.Playing : GamePhase.Idle;
-            if (_session != null)
-                _session.StateChanged += OnSessionStateChanged;
+
+            if (_eventBus != null)
+            {
+                _eventBus.Subscribe<VictoryEvent>(OnVictory);
+                _eventBus.Subscribe<RackFullEvent>(OnRackFull);
+            }
+
             if (hidePanelsOnNewLevel)
                 SetEndPanels(win: false, lose: false);
         }
 
-        void UnhookSession()
+        void Unhook()
         {
-            if (_session != null)
-                _session.StateChanged -= OnSessionStateChanged;
+            if (_eventBus != null)
+            {
+                _eventBus.Unsubscribe<VictoryEvent>(OnVictory);
+                _eventBus.Unsubscribe<RackFullEvent>(OnRackFull);
+            }
+
+            _eventBus = null;
             _session = null;
         }
 
-        void OnSessionStateChanged()
+        void OnVictory(VictoryEvent _)
         {
-            if (_outcomeHandled || _session == null)
-                return;
+            if (_outcomeHandled || _session == null) return;
+            _outcomeHandled = true;
+            Phase = GamePhase.Won;
+            LastOutcomeStats = GameStatsSnapshot.FromSession(_session);
+            SetEndPanels(win: true, lose: false);
+        }
 
-            if (_session.HasWon)
-            {
-                _outcomeHandled = true;
-                Phase = GamePhase.Won;
-                LastOutcomeStats = GameStatsSnapshot.FromSession(_session);
-                SetEndPanels(win: true, lose: false);
-                return;
-            }
-
-            if (_session.HasFailed)
-            {
-                _outcomeHandled = true;
-                Phase = GamePhase.LostRackFull;
-                LastOutcomeStats = GameStatsSnapshot.FromSession(_session);
-                SetEndPanels(win: false, lose: true);
-            }
+        void OnRackFull(RackFullEvent _)
+        {
+            if (_outcomeHandled || _session == null) return;
+            _outcomeHandled = true;
+            Phase = GamePhase.LostRackFull;
+            LastOutcomeStats = GameStatsSnapshot.FromSession(_session);
+            SetEndPanels(win: false, lose: true);
         }
 
         void SetEndPanels(bool win, bool lose)
@@ -105,10 +111,6 @@ namespace Presentation
                 losePanel.SetActive(lose);
         }
 
-        /// <summary>
-        /// Reloads the same level the <see cref="LevelBoardLoader"/> is using (Resources path or TextAsset) and closes win/lose panels.
-        /// Wire this to your Retry / Play Again button’s <c>OnClick</c>.
-        /// </summary>
         public void RetryCurrentLevel()
         {
             if (boardLoader == null)
@@ -121,10 +123,6 @@ namespace Presentation
             boardLoader.Reload();
         }
 
-        /// <summary>
-        /// Closes end panels and loads <c>Resources/.../level_{N+1}</c> if it exists.
-        /// Wire to a “Next” button on the win panel. If there is no next file, logs a warning and leaves flow unchanged.
-        /// </summary>
         public void LoadNextLevel()
         {
             if (boardLoader == null)
@@ -137,7 +135,6 @@ namespace Presentation
             boardLoader.TryLoadNextLevel();
         }
 
-        /// <summary>True if <c>Resources/.../level_{Current+1}</c> exists (TextAsset mode always false).</summary>
         public bool HasNextLevel()
         {
             if (boardLoader == null || !boardLoader.UsesNumberedResourcesLevels) return false;
@@ -145,7 +142,6 @@ namespace Presentation
             return Resources.Load<TextAsset>(path) != null;
         }
 
-        /// <summary>Current progress while playing; default if no session.</summary>
         public GameStatsSnapshot GetLiveStats() => GameStatsSnapshot.FromSession(_session);
     }
 }

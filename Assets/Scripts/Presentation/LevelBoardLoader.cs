@@ -74,7 +74,6 @@ namespace Presentation
         BoardTileCollectCoordinator _collect;
         LevelObjectiveSession _session;
         readonly GameplayEventBus _gameplayEventBus = new GameplayEventBus();
-        readonly GameplayEventObserverBridge _observerBridge = new GameplayEventObserverBridge();
         int _boardBuildGeneration;
 
         void Awake()
@@ -213,9 +212,7 @@ namespace Presentation
             {
                 CollectFlowLogger = new UnityCollectFlowLogger { IsEnabled = logTileCollectFlow }
             };
-            _observerBridge.Bind(_gameplayEventBus);
-            _observerBridge.SetPlaying();
-            orderRackHud?.BindSession(_session);
+            orderRackHud?.BindSession(_session, _gameplayEventBus);
             _collect.BindSession(_session);
             SessionAssigned?.Invoke(_session);
             Debug.Log($"[LevelBoardLoader] Loaded from {source}\n{LevelGridParser.BuildValidationReport(definition.Board)}");
