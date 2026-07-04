@@ -62,14 +62,26 @@ namespace Presentation
             _controller.ConfigureViews(stripViews, rackBar);
         }
 
-        public bool TryGetRackSlotImage(int index, out Image img) =>
-            EnsureController() && _controller.DestinationLayout.TryGetRackSlotImage(index, out img);
+        public bool TryGetRackSlotImage(int index, out Image img)
+        {
+            img = null;
+            if (!EnsureController()) return false;
+            return _controller.DestinationLayout.TryGetRackSlotImage(index, out img);
+        }
 
-        public bool TryGetRackSlotImages(out Image[] images) =>
-            EnsureController() && _controller.DestinationLayout.TryGetRackSlotImages(out images);
+        public bool TryGetRackSlotImages(out Image[] images)
+        {
+            images = null;
+            if (!EnsureController()) return false;
+            return _controller.DestinationLayout.TryGetRackSlotImages(out images);
+        }
 
-        public bool TryGetOrderIconRectTransform(int activeOrderSlot, int iconIdx, out RectTransform rect) =>
-            EnsureController() && _controller.DestinationLayout.TryGetOrderIconRectTransform(activeOrderSlot, iconIdx, out rect);
+        public bool TryGetOrderIconRectTransform(int activeOrderSlot, int iconIdx, out RectTransform rect)
+        {
+            rect = null;
+            if (!EnsureController()) return false;
+            return _controller.DestinationLayout.TryGetOrderIconRectTransform(activeOrderSlot, iconIdx, out rect);
+        }
 
         bool EnsureController()
         {

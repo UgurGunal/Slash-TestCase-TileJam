@@ -41,11 +41,17 @@ namespace Presentation.Hud
             return _strips[activeOrderSlot].TryGetIconRectTransform(iconIdx, out rect);
         }
 
-        public bool TryGetRackSlotImage(int index, out Image img) =>
-            _rack != null && _rack.TryGetRackSlotImage(index, out img);
+        public bool TryGetRackSlotImage(int index, out Image img)
+        {
+            img = null;
+            return _rack != null && _rack.TryGetRackSlotImage(index, out img);
+        }
 
-        public bool TryGetRackSlotImages(out Image[] images) =>
-            _rack != null && _rack.TryGetRackSlotImages(out images);
+        public bool TryGetRackSlotImages(out Image[] images)
+        {
+            images = null;
+            return _rack != null && _rack.TryGetRackSlotImages(out images);
+        }
 
         bool TryResolveRackSlot(int idx, out RectTransform rect)
         {
