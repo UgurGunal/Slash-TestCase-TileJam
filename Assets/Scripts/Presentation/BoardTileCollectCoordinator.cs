@@ -18,6 +18,7 @@ namespace Presentation
         CollectDestinationResolver _destinationResolver;
 
         LevelObjectiveSession _session;
+        readonly RackDrainService _rackDrain = new RackDrainService();
         bool _tileCollectInFlight;
 
         public BoardTileCollectCoordinator(LevelBoardGrid grid) =>
@@ -150,9 +151,9 @@ namespace Presentation
         void FinishRackDrainSynchronously()
         {
             if (_session == null) return;
-            while (_session.TryPeekRackDrainStep(out var i, out _, out _))
+            while (_rackDrain.TryPeekStep(_session, out var i, out _, out _))
             {
-                var r = _session.ApplyRackDrainStepAt(i);
+                var r = _rackDrain.ApplyStepAt(_session, i);
                 if (r == TileCollectResult.LevelWon)
                 {
                     Debug.Log("[BoardCollect] All orders completed — level won.");
@@ -179,11 +180,11 @@ namespace Presentation
                 return;
             }
 
-            while (_session.TryPeekRackDrainStep(out var rackIdx, out _, out var orderDestination))
+            while (_rackDrain.TryPeekStep(_session, out var rackIdx, out _, out var orderDestination))
             {
                 if (!_orderRackHud.TryGetRackSlotImage(rackIdx, out var rackImg))
                 {
-                    var r = _session.ApplyRackDrainStepAt(rackIdx);
+                    var r = _rackDrain.ApplyStepAt(_session, rackIdx);
                     _session.NotifyStateChanged();
                     if (r == TileCollectResult.LevelWon)
                     {
@@ -227,7 +228,7 @@ namespace Presentation
                 return;
             }
 
-            var applyResult = _session.ApplyRackDrainStepAt(rackIdx);
+            var applyResult = _rackDrain.ApplyStepAt(_session, rackIdx);
             _session.NotifyStateChanged();
 
             if (applyResult == TileCollectResult.LevelWon)

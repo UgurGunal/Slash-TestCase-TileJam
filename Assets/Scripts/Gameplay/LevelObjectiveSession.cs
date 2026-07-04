@@ -5,11 +5,8 @@ using LevelData;
 
 namespace Gameplay
 {
-    /// <summary>
-    /// Order queue, active slots (<see cref="GameConstants.ActiveOrderSlotsCount"/>), and rack.
-    /// Within each order, required icons may be collected in any order; duplicates use positional fulfillment slots.
-    /// </summary>
-    public sealed class LevelObjectiveSession
+    /// <summary>Facade for order queue, rack, and board collect rules.</summary>
+    public sealed class LevelObjectiveSession : IRackDrainHost
     {
         readonly ActiveOrderSlots _orderSlots;
         readonly RackState _rack;
@@ -38,12 +35,17 @@ namespace Gameplay
 
         public event Action StateChanged;
 
-        /// <summary>Fired after active order slot <paramref name="slot"/> advances to the next level order (or idle).</summary>
         public event Action<int> ActiveOrderSlotAdvanced
         {
             add => _orderSlots.ActiveOrderSlotAdvanced += value;
             remove => _orderSlots.ActiveOrderSlotAdvanced -= value;
         }
+
+        RackState IRackDrainHost.Rack => _rack;
+        ActiveOrderSlots IRackDrainHost.OrderSlots => _orderSlots;
+        ICollectFlowLogger IRackDrainHost.CollectFlowLogger => CollectFlowLogger;
+        IGameplayEventBus IRackDrainHost.EventBus => _eventBus;
+        bool IRackDrainHost.IsDrainInactive => _failed || HasWon;
 
         public bool HasFailed => _failed || _collectContext.Failed;
         public bool HasWon => _orderSlots.HasWon;
@@ -57,61 +59,11 @@ namespace Gameplay
         public bool GetActiveSlot(int slot, out int levelOrderIndex, out OrderSpec orderSpec, out bool[] cellsFulfilled) =>
             _orderSlots.GetActiveSlot(slot, out levelOrderIndex, out orderSpec, out cellsFulfilled);
 
-        public bool IsSlotIdle(int slot) => _orderSlots.IsSlotIdle(slot);
+        public bool IsSlotIdle(int slot) => _orderSlots.IsSlotIdle(int slot);
 
-        public void NotifyStateChanged() => StateChanged?.Invoke();
+        public void NotifyStateChanged() => RaiseStateChanged();
 
-        public bool TryPeekRackDrainStep(out int rackIndex, out TileKind kind, out TileCollectDestination orderDestination)
-        {
-            rackIndex = -1;
-            kind = default;
-            orderDestination = default;
-            if (_failed || HasWon) return false;
-
-            for (var i = 0; i < _rack.Count; i++)
-            {
-                var k = _rack.GetSlot(i).Value;
-                if (!_orderSlots.FindFirstUnfilledOrderMatch(k, out var slot, out var iconIdx, out _))
-                    continue;
-                rackIndex = i;
-                kind = k;
-                orderDestination = TileCollectDestination.ForOrderSlot(slot, iconIdx);
-                return true;
-            }
-
-            return false;
-        }
-
-        public TileCollectResult ApplyRackDrainStepAt(int rackIndex)
-        {
-            if (_failed || HasWon)
-                return HasWon ? TileCollectResult.LevelWon : TileCollectResult.ConsumedForOrder;
-            if ((uint)rackIndex >= (uint)_rack.Count)
-                return TileCollectResult.ConsumedForOrder;
-
-            var kind = _rack.GetSlot(rackIndex).Value;
-            if (!_orderSlots.TryFulfillIcon(kind, CollectApplySource.FromRack, CollectFlowLogger, out var completedWholeOrder, out var r))
-                return TileCollectResult.ConsumedForOrder;
-
-            if (CollectFlowLogger.IsEnabled)
-                CollectFlowLogger.Log($"[TileCollect] Rack auto: consumed rack slot {rackIndex} ({kind}) — removed from rack and applied to orders.");
-
-            _rack.RemoveAt(rackIndex);
-            PublishCollectEvents(kind, r, completedWholeOrder, fromRack: true);
-            RaiseStateChanged();
-            return r;
-        }
-
-        void PublishCollectEvents(TileKind kind, TileCollectResult result, bool completedWholeOrder, bool fromRack)
-        {
-            if (result == TileCollectResult.LevelWon)
-                _eventBus.Publish(new VictoryEvent());
-
-            if (completedWholeOrder)
-                _eventBus.Publish(new OrderCompletedEvent(kind, fromRack));
-            else
-                _eventBus.Publish(new TileMatchedOrderEvent(kind));
-        }
+        void IRackDrainHost.RaiseStateChanged() => RaiseStateChanged();
 
         public bool TryPeekCollectDestination(TileKind kind, out TileCollectDestination destination, out TileCollectResult failureReason)
         {
