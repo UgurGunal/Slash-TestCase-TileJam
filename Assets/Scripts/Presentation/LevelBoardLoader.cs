@@ -59,6 +59,7 @@ namespace Presentation
         public LevelBoardSpec LastSpec { get; private set; }
         public LevelDefinition LastDefinition { get; private set; }
         public LevelObjectiveSession Session => _session;
+        public IGameplayEventBus GameplayEventBus => _gameplayEventBus;
 
         /// <summary>Last successfully loaded 1-based level index from a <c>.../level_N</c> Resources path; used for <see cref="TryLoadNextLevel"/>.</summary>
         public int CurrentLevelNumber { get; private set; } = 1;
@@ -72,6 +73,8 @@ namespace Presentation
         LevelBoardGrid _grid;
         BoardTileCollectCoordinator _collect;
         LevelObjectiveSession _session;
+        readonly GameplayEventBus _gameplayEventBus = new GameplayEventBus();
+        readonly GameplayEventObserverBridge _observerBridge = new GameplayEventObserverBridge();
         int _boardBuildGeneration;
 
         void Awake()
@@ -206,7 +209,12 @@ namespace Presentation
             if (levelJson == null && TryParseLevelNumberFromResourcesPath(resourcesLevelPath, out var parsedLevel))
                 CurrentLevelNumber = parsedLevel;
 
-            _session = new LevelObjectiveSession(definition.Orders) { LogCollectFlow = logTileCollectFlow };
+            _session = new LevelObjectiveSession(definition.Orders, _gameplayEventBus)
+            {
+                CollectFlowLogger = new UnityCollectFlowLogger { IsEnabled = logTileCollectFlow }
+            };
+            _observerBridge.Bind(_gameplayEventBus);
+            _observerBridge.SetPlaying();
             orderRackHud?.BindSession(_session);
             _collect.BindSession(_session);
             SessionAssigned?.Invoke(_session);

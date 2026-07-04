@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Presentation
+namespace LevelEditor
 {
     /// <summary>
     /// Highlights a full <b>major cell</b> (<see cref="LevelEditorGridLinesView.GridCellWidth"/> × height) centered on the

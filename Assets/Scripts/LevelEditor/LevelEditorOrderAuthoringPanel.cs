@@ -6,7 +6,9 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
-namespace Presentation
+using Presentation;
+
+namespace LevelEditor
 {
     /// <summary>How to restore horizontal scroll after order UI is rebuilt (clear + recreate children).</summary>
     public enum OrderScrollAfterRebuild
@@ -83,11 +85,8 @@ namespace Presentation
         [SerializeField] UnityEvent onOrdersAuthoringFinalized;
 
         readonly List<List<TileKind>> _orderColumns = new List<List<TileKind>>();
+        readonly OrderAuthoringState _authoringState = new OrderAuthoringState();
 
-        /// <summary>Deep copy of <see cref="_orderColumns"/> taken when orders are finalized (before placement consumes tiles). Used for JSON export so customer groupings survive an empty queue.</summary>
-        List<List<TileKind>> _ordersSnapshotAtFinalize;
-
-        bool _ordersAuthoringFinalized;
         Color _orderContentBaseColor;
         bool _orderContentBaseCaptured;
 
@@ -133,7 +132,7 @@ namespace Presentation
         public IReadOnlyList<IReadOnlyList<TileKind>> FinalizedOrders => new FinalizedColumnsView(_orderColumns);
 
         /// <summary>True after <see cref="FinalizeOrders"/> until <see cref="ClearFinalizedOrders"/> or <see cref="UnlockOrderAuthoring"/>.</summary>
-        public bool OrdersAuthoringFinalized => _ordersAuthoringFinalized;
+        public bool OrdersAuthoringFinalized => _authoringState.IsFinalized;
 
         /// <summary>Logical cell size for order column tiles (argument to <see cref="BoardTileView.Bind"/> with scale 1).</summary>
         public Vector2 OrderTileCellSize => orderTileCellSize;
@@ -223,7 +222,7 @@ namespace Presentation
                 Mathf.Approximately(_lastPaletteRowSpacing, paletteRowSpacing) &&
                 _lastOrderScroll == orderAreaScroll &&
                 _lastOrderScrollAfterRebuild == orderScrollAfterRebuild &&
-                _lastOrdersAuthoringFinalized == _ordersAuthoringFinalized)
+                _lastOrdersAuthoringFinalized == _authoringState.IsFinalized)
                 return;
 
             ConfigureOrderScrollForPanel();
@@ -232,7 +231,10 @@ namespace Presentation
             ClearChildren(paletteRow);
             var paletteEffCell = paletteCellSize;
             RectTransform paletteLineRt = null;
-            for (var i = 0; i < GameConstants.PlayableTileKindCount; i++)
+            var paletteKindCount = iconLibrary != null
+                ? iconLibrary.ResolvedDefinitionCount
+                : GameConstants.PlayableTileKindCount;
+            for (var i = 0; i < paletteKindCount; i++)
             {
                 if (i % paletteMaxTilesPerRow == 0)
                     paletteLineRt = CreateHorizontalLayoutRow(
@@ -250,7 +252,7 @@ namespace Presentation
                 StripLayoutElementFrom(tile.gameObject);
                 tile.Bind(kind, i, 0, 0, Vector2.zero, paletteEffCell, 1f, iconLibrary);
                 ApplyUniformVisualScale(tileRt, paletteTileScale);
-                var paletteInteractive = !_ordersAuthoringFinalized;
+                var paletteInteractive = !_authoringState.IsFinalized;
                 tile.SetClickableVisual(paletteInteractive);
                 tile.SetClickHandler(paletteInteractive ? OnPaletteTileClicked : null);
             }
@@ -278,7 +280,7 @@ namespace Presentation
             _lastPaletteRowSpacing = paletteRowSpacing;
             _lastOrderScroll = orderAreaScroll;
             _lastOrderScrollAfterRebuild = orderScrollAfterRebuild;
-            _lastOrdersAuthoringFinalized = _ordersAuthoringFinalized;
+            _lastOrdersAuthoringFinalized = _authoringState.IsFinalized;
         }
 
         void LateUpdate()
@@ -306,7 +308,7 @@ namespace Presentation
 
         void OnPaletteTileClicked(BoardTileView view)
         {
-            if (_ordersAuthoringFinalized) return;
+            if (_authoringState.IsFinalized) return;
             var kind = view.Kind;
             if (kind == TileKind.None) return;
             EnsureAtLeastOneColumn();
@@ -319,7 +321,7 @@ namespace Presentation
         /// <summary>Clears tiles in the active (rightmost) column only.</summary>
         public void ClearDraft()
         {
-            if (_ordersAuthoringFinalized) return;
+            if (_authoringState.IsFinalized) return;
             EnsureAtLeastOneColumn();
             _orderColumns[_orderColumns.Count - 1].Clear();
             RebuildOrderColumnsVisuals();
@@ -328,7 +330,7 @@ namespace Presentation
 
         public void RemoveLastFromDraft()
         {
-            if (_ordersAuthoringFinalized) return;
+            if (_authoringState.IsFinalized) return;
             EnsureAtLeastOneColumn();
             var col = _orderColumns[_orderColumns.Count - 1];
             if (col.Count == 0) return;
@@ -340,7 +342,7 @@ namespace Presentation
         /// <summary>If the active column has at least one tile, appends a new empty column to the right.</summary>
         public void AddOrderFromDraft()
         {
-            if (_ordersAuthoringFinalized) return;
+            if (_authoringState.IsFinalized) return;
             EnsureAtLeastOneColumn();
             var active = _orderColumns[_orderColumns.Count - 1];
             if (active.Count == 0) return;
@@ -353,8 +355,7 @@ namespace Presentation
         /// <summary>Removes all columns and starts one empty active column.</summary>
         public void ClearFinalizedOrders()
         {
-            _ordersAuthoringFinalized = false;
-            _ordersSnapshotAtFinalize = null;
+            _authoringState.Clear();
             _orderColumns.Clear();
             _orderColumns.Add(new List<TileKind>());
             if (orderAreaScroll != null)
@@ -368,9 +369,8 @@ namespace Presentation
         /// <summary>Locks editing after the user finalizes (same as the Finalize Orders button).</summary>
         public void FinalizeOrders()
         {
-            if (_ordersAuthoringFinalized) return;
-            _ordersAuthoringFinalized = true;
-            CaptureOrdersSnapshotAtFinalize();
+            if (_authoringState.IsFinalized) return;
+            _authoringState.FinalizeFrom(_orderColumns);
             _rebuildQueued = true;
             onOrdersAuthoringFinalized?.Invoke();
             OnOrdersAuthoringFinalized?.Invoke();
@@ -379,21 +379,10 @@ namespace Presentation
         /// <summary>Re-enables palette, order tile edits, and action buttons without clearing order data.</summary>
         public void UnlockOrderAuthoring()
         {
-            if (!_ordersAuthoringFinalized) return;
-            _ordersAuthoringFinalized = false;
-            _ordersSnapshotAtFinalize = null;
+            if (!_authoringState.IsFinalized) return;
+            _authoringState.Unlock();
             _rebuildQueued = true;
             OnOrdersAuthoringUnlocked?.Invoke();
-        }
-
-        void CaptureOrdersSnapshotAtFinalize()
-        {
-            _ordersSnapshotAtFinalize = new List<List<TileKind>>();
-            for (var i = 0; i < _orderColumns.Count; i++)
-            {
-                var col = _orderColumns[i];
-                _ordersSnapshotAtFinalize.Add(col != null ? new List<TileKind>(col) : new List<TileKind>());
-            }
         }
 
         /// <summary>True when every order column is empty (all tiles placed on the board / rack pipeline cleared for export).</summary>
@@ -415,16 +404,14 @@ namespace Presentation
         {
             orders = null;
             error = null;
-            if (_ordersSnapshotAtFinalize == null)
-            {
-                error = "No finalized order snapshot. Finalize orders again.";
+            if (!_authoringState.TryValidateSnapshot(out error))
                 return false;
-            }
 
             orders = new List<List<int>>();
-            for (var c = 0; c < _ordersSnapshotAtFinalize.Count; c++)
+            var snapshot = _authoringState.SnapshotAtFinalize;
+            for (var c = 0; c < snapshot.Count; c++)
             {
-                var col = _ordersSnapshotAtFinalize[c];
+                var col = snapshot[c];
                 if (col == null || col.Count == 0)
                     continue;
                 var row = new List<int>(col.Count);
@@ -504,7 +491,7 @@ namespace Presentation
         public bool TryTakeActiveOrderTileToHand(int columnIndex, int tileIndex, out TileKind takenFromCell)
         {
             takenFromCell = TileKind.None;
-            if (!_ordersAuthoringFinalized) return false;
+            if (!_authoringState.IsFinalized) return false;
             RecomputeActiveOrderColumnIndicesForHighlight();
             if (!_activeOrderColumnIndicesScratch.Contains(columnIndex)) return false;
             if ((uint)columnIndex >= (uint)_orderColumns.Count) return false;
@@ -627,11 +614,11 @@ namespace Presentation
                     StripLayoutElementFrom(tile.gameObject);
                     tile.Bind(kind, ti, ci, 0, Vector2.zero, orderTileCellSize, 1f, iconLibrary);
                     ApplyUniformVisualScale(tileRt, orderTileScale);
-                    if (_ordersAuthoringFinalized && _activeOrderColumnIndicesScratch.Contains(ci))
+                    if (_authoringState.IsFinalized && _activeOrderColumnIndicesScratch.Contains(ci))
                         tile.SetActiveOrderHighlight(true, activeOrderTileTint);
                     else
                         tile.SetActiveOrderHighlight(false, activeOrderTileTint);
-                    var orderEditable = !_ordersAuthoringFinalized;
+                    var orderEditable = !_authoringState.IsFinalized;
                     tile.SetClickableVisual(true);
                     if (orderEditable && isActiveColumn)
                     {
@@ -639,7 +626,7 @@ namespace Presentation
                         var t = ti;
                         tile.SetClickHandler(_ => RemoveTileAt(c, t));
                     }
-                    else if (_ordersAuthoringFinalized && _activeOrderColumnIndicesScratch.Contains(ci))
+                    else if (_authoringState.IsFinalized && _activeOrderColumnIndicesScratch.Contains(ci))
                     {
                         var c = ci;
                         var t = ti;
@@ -667,12 +654,12 @@ namespace Presentation
                 _orderContentBaseCaptured = true;
             }
 
-            g.color = _ordersAuthoringFinalized ? orderContentFinalizedTint : _orderContentBaseColor;
+            g.color = _authoringState.IsFinalized ? orderContentFinalizedTint : _orderContentBaseColor;
         }
 
         void RefreshOrderActionButtons()
         {
-            var allow = !_ordersAuthoringFinalized;
+            var allow = !_authoringState.IsFinalized;
             if (addOrderButton != null)
                 addOrderButton.interactable = allow;
             if (finalizeOrdersButton != null)
@@ -708,7 +695,7 @@ namespace Presentation
 
         void RemoveTileAt(int columnIndex, int tileIndex)
         {
-            if (_ordersAuthoringFinalized) return;
+            if (_authoringState.IsFinalized) return;
             if ((uint)columnIndex >= (uint)_orderColumns.Count) return;
             if (columnIndex != _orderColumns.Count - 1) return;
             var col = _orderColumns[columnIndex];

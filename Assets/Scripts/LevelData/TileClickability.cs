@@ -1,4 +1,6 @@
 using Core;
+using System.Collections.Generic;
+using LevelData.Board;
 
 namespace LevelData
 {
@@ -8,25 +10,8 @@ namespace LevelData
     /// </summary>
     public static class TileClickability
     {
-        public static bool IsClickable(PlayableBoardState board, int x, int y, int layer)
-        {
-            if (board == null || !board.HasTile(x, y, layer)) return false;
-            if (layer >= board.Depth - 1) return true;
-
-            for (var lz = layer + 1; lz < board.Depth; lz++)
-            {
-                for (var dy = -1; dy <= 1; dy++)
-                for (var dx = -1; dx <= 1; dx++)
-                {
-                    var nx = x + dx;
-                    var ny = y + dy;
-                    if ((uint)nx >= (uint)board.Width || (uint)ny >= (uint)board.Height) continue;
-                    if (board.HasTile(nx, ny, lz)) return false;
-                }
-            }
-
-            return true;
-        }
+        public static bool IsClickable(PlayableBoardState board, int x, int y, int layer) =>
+            ClickabilityService.IsClickable(board, x, y, layer);
 
         /// <summary>Same rules as <see cref="IsClickable(PlayableBoardState,int,int,int)"/> for level-editor placement grids (<c>x,y</c> = slot indices, <c>z</c> = stack layer).</summary>
         public static bool IsClickable(TileKind?[, ,] cells, int x, int y, int layer)

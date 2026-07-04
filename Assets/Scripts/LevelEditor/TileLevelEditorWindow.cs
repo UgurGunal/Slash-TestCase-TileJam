@@ -8,10 +8,12 @@ using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
 
-/// <summary>Author 3D matrix levels with layout rules; export/import JSON matching <see cref="Matrix3DLevelJsonDto"/>.</summary>
-public sealed class TileLevelEditorWindow : EditorWindow
+namespace LevelEditor
 {
-    int _width = 3;
+    /// <summary>Author 3D matrix levels with layout rules; export/import JSON matching <see cref="Matrix3DLevelJsonDto"/>.</summary>
+    public sealed class TileLevelEditorWindow : EditorWindow
+    {
+        int _width = 3;
     int _height = 3;
     int _depth = 2;
     int[,,] _cells;
@@ -552,6 +554,7 @@ public sealed class TileLevelEditorWindow : EditorWindow
         }
 
         _currentLayer = 0;
+    }
     }
 }
 #endif

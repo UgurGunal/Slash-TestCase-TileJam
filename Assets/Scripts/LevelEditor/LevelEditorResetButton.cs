@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Presentation
+namespace LevelEditor
 {
     /// <summary>
     /// Calls <see cref="LevelEditorTilePlacementController.ResetLevelEditor"/> — clears orders, board, rack, hand, and related UI.

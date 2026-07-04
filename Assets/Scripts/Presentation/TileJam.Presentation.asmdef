@@ -1,0 +1,19 @@
+{
+    "name": "TileJam.Presentation",
+    "rootNamespace": "Presentation",
+    "references": [
+        "TileJam.Core",
+        "TileJam.LevelData",
+        "TileJam.Gameplay",
+        "Assembly-CSharp-firstpass"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,17 @@
+{
+    "name": "TileJam.Gameplay",
+    "rootNamespace": "Gameplay",
+    "references": [
+        "TileJam.Core",
+        "TileJam.LevelData"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

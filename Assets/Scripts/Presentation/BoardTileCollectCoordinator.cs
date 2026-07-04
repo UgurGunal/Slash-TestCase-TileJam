@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Presentation
 {
     /// <summary>
-    /// Input → session collect rules, board ↔ HUD fly feedback, and deferred rack→order drain.
+    /// Input → session collect rules, board ↔ HUD fly feedback, and rack→order drain orchestration.
     /// Keeps <see cref="LevelBoardGrid"/> free of animation and objective logic.
     /// </summary>
     public sealed class BoardTileCollectCoordinator
@@ -15,6 +15,7 @@ namespace Presentation
         readonly LevelBoardGrid _grid;
         TileCollectFly _collectFly;
         OrderRackHud _orderRackHud;
+        CollectDestinationResolver _destinationResolver;
 
         LevelObjectiveSession _session;
         bool _tileCollectInFlight;
@@ -26,11 +27,11 @@ namespace Presentation
         {
             _collectFly = collectFly;
             _orderRackHud = orderRackHud;
+            _destinationResolver = orderRackHud != null ? new CollectDestinationResolver(orderRackHud) : null;
         }
 
         public void BindSession(LevelObjectiveSession session) => _session = session;
 
-        /// <summary>Clears the “collect in progress” guard (e.g. when the level is reloaded mid-animation).</summary>
         public void CancelInFlightCollect() => _tileCollectInFlight = false;
 
         public void HandleTileClicked(BoardTileView view)
@@ -42,21 +43,21 @@ namespace Presentation
             var x = view.GridX;
             var y = view.GridY;
             var l = view.LayerIndex;
-            if (!TileClickability.IsClickable(_grid.PlayState, x, y, l)) return;
+            if (!ClickabilityService.IsClickable(_grid.PlayState, x, y, l)) return;
 
-            if (_collectFly == null || !_collectFly.UseAnimation || _orderRackHud == null)
+            if (_collectFly == null || !_collectFly.UseAnimation || _destinationResolver == null)
             {
                 CollectTileInstant(view, x, y, l);
                 return;
             }
 
-            if (!_session.TryGetFlyTargetForKind(view.Kind, out var flyTarget, out _))
+            if (!_session.TryPeekCollectDestination(view.Kind, out var destination, out _))
             {
                 CollectTileInstant(view, x, y, l);
                 return;
             }
 
-            if (!_orderRackHud.TryGetRectTransformForFlyTarget(flyTarget, out var targetRt))
+            if (!_destinationResolver.TryResolve(destination, out var targetRt))
             {
                 CollectTileInstant(view, x, y, l);
                 return;
@@ -83,24 +84,10 @@ namespace Presentation
                 return;
             }
 
-            var deferRackFly = _collectFly != null && _collectFly.UseAnimation && _orderRackHud != null;
-            _session.DeferRackDrainAnimation = deferRackFly;
-            TileCollectResult result;
-            try
-            {
-                result = _session.TryCollectTile(kind);
-            }
-            finally
-            {
-                _session.DeferRackDrainAnimation = false;
-            }
+            var result = _session.TryCollectTile(kind);
+            LogCollectOutcome(result);
 
-            if (result == TileCollectResult.LevelWon)
-                Debug.Log("[BoardCollect] All orders completed — level won.");
-            if (result == TileCollectResult.FailedRackFull)
-                Debug.LogWarning("[BoardCollect] Rack full — level failed.");
-
-            if (result == TileCollectResult.RackDrainPending)
+            if (result == TileCollectResult.OrderCompleted)
             {
                 ProcessNextAnimatedRackDrainStep();
                 return;
@@ -118,17 +105,7 @@ namespace Presentation
                 return;
             }
 
-            var deferRackFly = _collectFly != null && _collectFly.UseAnimation && _orderRackHud != null;
-            _session.DeferRackDrainAnimation = deferRackFly;
-            TileCollectResult result;
-            try
-            {
-                result = _session.TryCollectTile(view.Kind);
-            }
-            finally
-            {
-                _session.DeferRackDrainAnimation = false;
-            }
+            var result = _session.TryCollectTile(view.Kind);
 
             if (result == TileCollectResult.SessionInactive)
             {
@@ -136,25 +113,32 @@ namespace Presentation
                 return;
             }
 
+            LogCollectOutcome(result);
+
             if (result == TileCollectResult.FailedRackFull)
             {
-                Debug.LogWarning("[BoardCollect] Rack full — level failed.");
                 EndTileCollectFlight();
                 return;
             }
 
-            if (result == TileCollectResult.LevelWon)
-                Debug.Log("[BoardCollect] All orders completed — level won.");
-
             _grid.RemoveAndDestroyTile(view, x, y, l);
 
-            if (result == TileCollectResult.RackDrainPending)
+            if (result == TileCollectResult.OrderCompleted)
             {
-                ProcessNextAnimatedRackDrainStep();
+                FinishRackDrainSynchronously();
+                EndTileCollectFlight();
                 return;
             }
 
             EndTileCollectFlight();
+        }
+
+        void LogCollectOutcome(TileCollectResult result)
+        {
+            if (result == TileCollectResult.LevelWon)
+                Debug.Log("[BoardCollect] All orders completed — level won.");
+            if (result == TileCollectResult.FailedRackFull)
+                Debug.LogWarning("[BoardCollect] Rack full — level failed.");
         }
 
         void EndTileCollectFlight()
@@ -188,14 +172,14 @@ namespace Presentation
             }
 
             var boardRoot = _grid.BoardRoot;
-            if (_collectFly == null || !_collectFly.UseAnimation || _orderRackHud == null || boardRoot == null)
+            if (_collectFly == null || !_collectFly.UseAnimation || _orderRackHud == null || _destinationResolver == null || boardRoot == null)
             {
                 FinishRackDrainSynchronously();
                 EndTileCollectFlight();
                 return;
             }
 
-            while (_session.TryPeekRackDrainStep(out var rackIdx, out _, out var orderTarget))
+            while (_session.TryPeekRackDrainStep(out var rackIdx, out _, out var orderDestination))
             {
                 if (!_orderRackHud.TryGetRackSlotImage(rackIdx, out var rackImg))
                 {
@@ -211,7 +195,7 @@ namespace Presentation
                     continue;
                 }
 
-                if (!_orderRackHud.TryGetRectTransformForFlyTarget(orderTarget, out var targetRt))
+                if (!_destinationResolver.TryResolve(orderDestination, out var targetRt))
                 {
                     FinishRackDrainSynchronously();
                     EndTileCollectFlight();
@@ -250,6 +234,12 @@ namespace Presentation
             {
                 Debug.Log("[BoardCollect] All orders completed — level won.");
                 EndTileCollectFlight();
+                return;
+            }
+
+            if (applyResult == TileCollectResult.OrderCompleted)
+            {
+                ProcessNextAnimatedRackDrainStep();
                 return;
             }
 
