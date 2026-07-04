@@ -9,48 +9,30 @@ using UnityEngine.Serialization;
 
 namespace Presentation
 {
-    /// <summary>
-    /// Level bootstrap: JSON → <see cref="LevelDefinition"/>, session + HUD binding, grid spawn.
-    /// Tile clicks and fly/rack orchestration live in <see cref="BoardTileCollectCoordinator"/>.
-    /// </summary>
     public sealed class LevelBoardLoader : MonoBehaviour
     {
         [Header("Source (first wins: assigned TextAsset, else Resources path)")]
         [SerializeField] TextAsset levelJson;
-        [Tooltip("Path relative to a Resources folder, without extension. Example: Levels/level_1 for Assets/Resources/Levels/level_1.json")]
         [SerializeField] string resourcesLevelPath = "Levels/level_1";
-
-        [Header("Numbered levels (Resources)")]
-        [Tooltip("Fallback folder for TryLoadNextLevel when resourcesLevelPath has no folder (e.g. only “level_1”). Default: Levels.")]
         [SerializeField] string numberedLevelsResourcesFolder = "Levels";
 
         [Header("Board")]
         [SerializeField] RectTransform boardRoot;
         [SerializeField] BoardTileView tilePrefab;
-        [Tooltip("Optional: 15 sprites (Type0–Type14). Empty slots use Resources/TileIcons/{name}.")]
         [SerializeField] TileIconLibrary tileIconLibrary;
-
-        [Header("Visual layout")]
-        [Tooltip("Cell sizes and tile padding. If unset, loads Resources/" + LevelBoardVisualLayoutSettings.ResourcesLoadName + " when present, else built-in fallbacks.")]
         [SerializeField] LevelBoardVisualLayoutSettings visualLayout;
 
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
         [SerializeField] OrderRackHud orderRackHud;
-        [Tooltip("Optional: DOTween fly-to-HUD feedback. If unassigned or disabled, collects instantly.")]
         [FormerlySerializedAs("collectFlyFeedback")]
         [SerializeField] TileCollectFly collectFly;
-        [Tooltip("Log each tile click: order match vs rack, strip indices, and automatic rack→order matches.")]
         [SerializeField] bool logTileCollectFlow;
 
         [Header("Board timing")]
-        [Tooltip(
-            "Wait this long after level data is ready before spawning tiles (session/HUD bind immediately). " +
-            "If > 0, any previous tiles are removed right away so clicks cannot use a stale board with the new session.")]
         [SerializeField] float boardInitializationDelaySec = 0.2f;
 
         [Header("Tile spawn intro")]
-        [Tooltip("On load, scale tiles from 0 → 1 with DOTween; same layer starts together, next layer delayed by the stagger.")]
         [SerializeField] bool tileSpawnScaleIn = true;
         [SerializeField] float tileSpawnLayerStaggerSec = 0.2f;
         [SerializeField] float tileSpawnScaleDurationSec = 0.28f;
@@ -60,65 +42,81 @@ namespace Presentation
         public LevelDefinition LastDefinition { get; private set; }
         public LevelObjectiveSession Session => _session;
         public IGameplayEventBus GameplayEventBus => _gameplayEventBus;
-
-        /// <summary>Last successfully loaded 1-based level index from a <c>.../level_N</c> Resources path; used for <see cref="TryLoadNextLevel"/>.</summary>
+        public OrderRackHud OrderRackHud => orderRackHud;
+        public TileCollectFly CollectFly => collectFly;
         public int CurrentLevelNumber { get; private set; } = 1;
-
-        /// <summary>When false, level JSON comes from the inspector TextAsset and <see cref="TryLoadNextLevel"/> will not run.</summary>
         public bool UsesNumberedResourcesLevels => levelJson == null;
 
-        /// <summary>Invoked after each successful <see cref="Reload"/> when a new <see cref="LevelObjectiveSession"/> is created and bound.</summary>
         public event Action<LevelObjectiveSession> SessionAssigned;
 
         LevelBoardGrid _grid;
         BoardTileCollectCoordinator _collect;
         LevelObjectiveSession _session;
-        readonly GameplayEventBus _gameplayEventBus = new GameplayEventBus();
+        IGameplayEventBus _gameplayEventBus;
+        bool _initialized;
         int _boardBuildGeneration;
 
-        void Awake()
+        public void Initialize(IGameplayEventBus eventBus)
         {
-            ResolveOptionalReferences();
+            if (eventBus == null)
+            {
+                Debug.LogError("[LevelBoardLoader] Initialize requires a gameplay event bus.", this);
+                return;
+            }
+
+            _gameplayEventBus = eventBus;
+            _initialized = true;
+
+            if (!ValidatePresentationReferences())
+                return;
+
             if (boardRoot == null)
             {
                 Debug.LogError("[LevelBoardLoader] Assign boardRoot.", this);
                 return;
             }
 
-            _grid = new LevelBoardGrid(boardRoot);
-            _collect = new BoardTileCollectCoordinator(_grid);
+            if (_grid == null || _collect == null)
+            {
+                _grid = new LevelBoardGrid(boardRoot);
+                _collect = new BoardTileCollectCoordinator(_grid);
+            }
+
             _collect.SetPresentationRefs(collectFly, orderRackHud);
 
-            if (loadOnAwake) Reload();
+            if (loadOnAwake)
+                Reload();
         }
 
-        /// <summary>Wires <see cref="collectFly"/> / <see cref="orderRackHud"/> when left unassigned (same GameObject or under the board Canvas).</summary>
-        void ResolveOptionalReferences()
+        bool ValidatePresentationReferences()
         {
-            if (collectFly == null)
-                collectFly = GetComponent<TileCollectFly>();
-
-            if (orderRackHud == null && boardRoot != null)
+            var ok = true;
+            if (orderRackHud == null)
             {
-                orderRackHud = boardRoot.GetComponentInParent<OrderRackHud>();
-                if (orderRackHud == null)
-                {
-                    var canvas = boardRoot.GetComponentInParent<Canvas>();
-                    if (canvas != null)
-                        orderRackHud = canvas.GetComponentInChildren<OrderRackHud>(true);
-                }
+                Debug.LogError("[LevelBoardLoader] Assign orderRackHud in the Inspector.", this);
+                ok = false;
             }
+
+            if (collectFly == null)
+            {
+                Debug.LogError("[LevelBoardLoader] Assign collectFly in the Inspector.", this);
+                ok = false;
+            }
+
+            return ok;
         }
 
         [ContextMenu("Reload level from JSON")]
         public void Reload() => Reload(resourcesLevelPath);
 
-        /// <summary>
-        /// Loads <c>Resources/{folder}/level_{CurrentLevelNumber+1}</c> if present. Returns false if there is no asset (e.g. last level).
-        /// Does nothing if a <see cref="levelJson"/> TextAsset is assigned (clear it to use Resources progression).
-        /// </summary>
         public bool TryLoadNextLevel()
         {
+            if (!_initialized)
+            {
+                Debug.LogError("[LevelBoardLoader] Not initialized — assign GameCompositionRoot.", this);
+                return false;
+            }
+
             if (levelJson != null)
             {
                 Debug.LogWarning("[LevelBoardLoader] Clear level TextAsset to advance numbered Resources levels.", this);
@@ -139,7 +137,6 @@ namespace Presentation
             return true;
         }
 
-        /// <summary>Resources path (no extension) for <c>level_{index}</c> using the same folder as the last path, or <see cref="numberedLevelsResourcesFolder"/>.</summary>
         public string BuildNumberedLevelResourcesPathForIndex(int levelIndexOneBased)
         {
             var n = Mathf.Max(1, levelIndexOneBased);
@@ -167,14 +164,19 @@ namespace Presentation
             return true;
         }
 
-        /// <summary>Load by Resources path (e.g. <c>Levels/level_02</c> for <c>Assets/Resources/Levels/level_02.json</c>).</summary>
         public void Reload(string resourcesPath)
         {
+            if (!_initialized)
+            {
+                Debug.LogError("[LevelBoardLoader] Reload before Initialize — wire GameCompositionRoot.", this);
+                return;
+            }
+
+            if (!ValidatePresentationReferences())
+                return;
+
             if (!string.IsNullOrWhiteSpace(resourcesPath))
                 resourcesLevelPath = resourcesPath.Trim();
-
-            ResolveOptionalReferences();
-            _collect?.SetPresentationRefs(collectFly, orderRackHud);
 
             if (boardRoot == null || tilePrefab == null)
             {
@@ -186,9 +188,9 @@ namespace Presentation
             {
                 _grid = new LevelBoardGrid(boardRoot);
                 _collect = new BoardTileCollectCoordinator(_grid);
-                _collect.SetPresentationRefs(collectFly, orderRackHud);
             }
 
+            _collect.SetPresentationRefs(collectFly, orderRackHud);
             _collect.CancelInFlightCollect();
 
             if (!TryGetJsonText(out var json, out var source))
@@ -212,7 +214,7 @@ namespace Presentation
             {
                 CollectFlowLogger = new UnityCollectFlowLogger { IsEnabled = logTileCollectFlow }
             };
-            orderRackHud?.BindSession(_session, _gameplayEventBus);
+            orderRackHud.BindSession(_session, _gameplayEventBus);
             _collect.BindSession(_session);
             SessionAssigned?.Invoke(_session);
             Debug.Log($"[LevelBoardLoader] Loaded from {source}\n{LevelGridParser.BuildValidationReport(definition.Board)}");

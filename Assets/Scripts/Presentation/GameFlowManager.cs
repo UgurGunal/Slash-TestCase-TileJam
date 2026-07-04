@@ -30,6 +30,8 @@ namespace Presentation
 
         public int CurrentLevelNumber => boardLoader != null ? boardLoader.CurrentLevelNumber : 0;
 
+        public LevelBoardLoader BoardLoader => boardLoader;
+
         void OnEnable()
         {
             if (boardLoader != null)
