@@ -2,6 +2,7 @@ using System;
 using Core;
 using Gameplay;
 using LevelData;
+using LevelData.Board;
 using UnityEngine;
 
 namespace Presentation
@@ -19,6 +20,8 @@ namespace Presentation
 
         LevelObjectiveSession _session;
         readonly RackDrainService _rackDrain = new RackDrainService();
+        GameplayRulesContext _rules;
+        BoardCell _pendingCollectCell;
         bool _tileCollectInFlight;
 
         public BoardTileCollectCoordinator(LevelBoardGrid grid) =>
@@ -30,6 +33,8 @@ namespace Presentation
             _orderRackHud = orderRackHud;
             _destinationResolver = orderRackHud != null ? new CollectDestinationResolver(orderRackHud) : null;
         }
+
+        public void SetGameplayRules(GameplayRulesContext rules) => _rules = rules;
 
         public void BindSession(LevelObjectiveSession session) => _session = session;
 
@@ -44,40 +49,48 @@ namespace Presentation
             var x = view.GridX;
             var y = view.GridY;
             var l = view.LayerIndex;
-            if (!TileClickability.IsClickable(_grid.PlayState, x, y, l)) return;
+            var boardCell = _grid.PlayState.GetCell(x, y, l);
+            if (!IsClickable(x, y, l, boardCell)) return;
 
             if (_collectFly == null || !_collectFly.UseAnimation || _destinationResolver == null)
             {
-                CollectTileInstant(view, x, y, l);
+                CollectTileInstant(view, x, y, l, boardCell);
                 return;
             }
 
             if (!_session.TryPeekCollectDestination(view.Kind, out var destination, out _))
             {
-                CollectTileInstant(view, x, y, l);
+                CollectTileInstant(view, x, y, l, boardCell);
                 return;
             }
 
             if (!_destinationResolver.TryResolve(destination, out var targetRt))
             {
-                CollectTileInstant(view, x, y, l);
+                CollectTileInstant(view, x, y, l, boardCell);
                 return;
             }
 
             if (!_collectFly.WillAnimate(view, targetRt, _grid.BoardRoot))
             {
-                CollectTileInstant(view, x, y, l);
+                CollectTileInstant(view, x, y, l, boardCell);
                 return;
             }
 
-            var kind = view.Kind;
+            _pendingCollectCell = boardCell;
             _tileCollectInFlight = true;
             _grid.DetachTileForAnimatedCollect(view, x, y, l);
 
-            _collectFly.Play(view, targetRt, _grid.BoardRoot, () => ApplyCollectAfterFlyAnimation(kind));
+            _collectFly.Play(view, targetRt, _grid.BoardRoot, () => ApplyCollectAfterFlyAnimation());
         }
 
-        void ApplyCollectAfterFlyAnimation(TileKind kind)
+        bool IsClickable(int x, int y, int layer, BoardCell cell)
+        {
+            if (_rules?.Clickability != null)
+                return _rules.Clickability.IsClickable(_grid.PlayState, x, y, layer, cell);
+            return TileClickability.IsClickable(_grid.PlayState, x, y, layer);
+        }
+
+        void ApplyCollectAfterFlyAnimation()
         {
             if (_session == null)
             {
@@ -85,7 +98,7 @@ namespace Presentation
                 return;
             }
 
-            var result = _session.TryCollectTile(kind);
+            var result = _session.TryCollectTile(_pendingCollectCell);
             LogCollectOutcome(result);
 
             if (result == TileCollectResult.OrderCompleted)
@@ -97,7 +110,7 @@ namespace Presentation
             EndTileCollectFlight();
         }
 
-        void CollectTileInstant(BoardTileView view, int x, int y, int l)
+        void CollectTileInstant(BoardTileView view, int x, int y, int l, BoardCell boardCell)
         {
             _tileCollectInFlight = true;
             if (_session == null)
@@ -106,7 +119,7 @@ namespace Presentation
                 return;
             }
 
-            var result = _session.TryCollectTile(view.Kind);
+            var result = _session.TryCollectTile(boardCell);
 
             if (result == TileCollectResult.SessionInactive)
             {
@@ -122,7 +135,8 @@ namespace Presentation
                 return;
             }
 
-            _grid.RemoveAndDestroyTile(view, x, y, l);
+            if (ShouldRemoveFromBoard(boardCell))
+                _grid.RemoveAndDestroyTile(view, x, y, l);
 
             if (result == TileCollectResult.OrderCompleted)
             {
@@ -246,5 +260,8 @@ namespace Presentation
 
             ProcessNextAnimatedRackDrainStep();
         }
+
+        bool ShouldRemoveFromBoard(BoardCell cell) =>
+            _rules == null || _rules.CanRemoveFromBoard(cell);
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using Core;
+using LevelData.Board;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -32,15 +33,23 @@ namespace Presentation
         Action<BoardTileView> _clicked;
 
         public TileKind Kind { get; private set; }
+        public string BehaviorId { get; private set; } = BoardCell.StandardBehaviorId;
         public int GridX { get; private set; }
         public int GridY { get; private set; }
         public int LayerIndex { get; private set; }
 
         void Awake() => ResolveChildImages();
 
-        public void Bind(TileKind kind, int gridX, int gridY, int layerIndex, Vector2 anchoredPosition, Vector2 cellSize, float tileSizeInCellScale, TileIconLibrary iconLibrary = null)
+        public void Bind(TileKind kind, int gridX, int gridY, int layerIndex, Vector2 anchoredPosition, Vector2 cellSize, float tileSizeInCellScale, TileIconLibrary iconLibrary = null) =>
+            Bind(BoardCell.FromKind(kind), gridX, gridY, layerIndex, anchoredPosition, cellSize, tileSizeInCellScale, iconLibrary);
+
+        public void Bind(BoardCell cell, int gridX, int gridY, int layerIndex, Vector2 anchoredPosition, Vector2 cellSize, float tileSizeInCellScale, TileIconLibrary iconLibrary = null)
         {
-            Kind = kind;
+            if (!cell.HasTile)
+                throw new ArgumentException("BoardCell must have a tile kind.", nameof(cell));
+
+            Kind = cell.Kind.Value;
+            BehaviorId = cell.BehaviorId;
             GridX = gridX;
             GridY = gridY;
             LayerIndex = layerIndex;

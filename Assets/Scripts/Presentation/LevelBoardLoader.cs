@@ -56,7 +56,7 @@ namespace Presentation
         bool _initialized;
         int _boardBuildGeneration;
 
-        public void Initialize(IGameplayEventBus eventBus)
+        public void Initialize(IGameplayEventBus eventBus, GameplayRulesContext rulesContext = null)
         {
             if (eventBus == null)
             {
@@ -65,6 +65,7 @@ namespace Presentation
             }
 
             _gameplayEventBus = eventBus;
+            _rulesContext = rulesContext ?? GameplayRulesContext.CreateDefault();
             _initialized = true;
 
             if (!ValidatePresentationReferences())
@@ -82,11 +83,15 @@ namespace Presentation
                 _collect = new BoardTileCollectCoordinator(_grid);
             }
 
+            _grid.SetClickabilityPipeline(_rulesContext.Clickability);
+            _collect.SetGameplayRules(_rulesContext);
             _collect.SetPresentationRefs(collectFly, orderRackHud);
 
             if (loadOnAwake)
                 Reload();
         }
+
+        GameplayRulesContext _rulesContext;
 
         bool ValidatePresentationReferences()
         {
@@ -190,6 +195,8 @@ namespace Presentation
                 _collect = new BoardTileCollectCoordinator(_grid);
             }
 
+            _grid.SetClickabilityPipeline(_rulesContext.Clickability);
+            _collect.SetGameplayRules(_rulesContext);
             _collect.SetPresentationRefs(collectFly, orderRackHud);
             _collect.CancelInFlightCollect();
 
@@ -210,7 +217,7 @@ namespace Presentation
             if (levelJson == null && TryParseLevelNumberFromResourcesPath(resourcesLevelPath, out var parsedLevel))
                 CurrentLevelNumber = parsedLevel;
 
-            _session = new LevelObjectiveSession(definition.Orders, _gameplayEventBus)
+            _session = new LevelObjectiveSession(definition.Orders, _gameplayEventBus, _rulesContext.Collect)
             {
                 CollectFlowLogger = new UnityCollectFlowLogger { IsEnabled = logTileCollectFlow }
             };

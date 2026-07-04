@@ -1,19 +1,23 @@
-using Core;
 using System.Collections.Generic;
 using LevelData.Board;
 
 namespace LevelData
 {
-    /// <summary>
-    /// Which tiles can be removed: blocked if <b>any</b> tile exists in the 8-neighbourhood (|Δx|≤1, |Δy|≤1, including same cell)
-    /// on <b>any</b> layer strictly above this tile (not only the layer immediately above).
-    /// </summary>
+    /// <summary>Backward-compatible entry point delegating to the default <see cref="Board.ClickabilityPipeline"/>.</summary>
     public static class TileClickability
     {
-        public static bool IsClickable(PlayableBoardState board, int x, int y, int layer) =>
-            ClickabilityService.IsClickable(board, x, y, layer);
+        static readonly Board.ClickabilityPipeline DefaultPipeline = Board.ClickabilityPipeline.CreateDefault();
 
-        /// <summary>Same rules as <see cref="IsClickable(PlayableBoardState,int,int,int)"/> for level-editor placement grids (<c>x,y</c> = slot indices, <c>z</c> = stack layer).</summary>
+        public static void SetPipeline(Board.ClickabilityPipeline pipeline) =>
+            _overridePipeline = pipeline;
+
+        static Board.ClickabilityPipeline _overridePipeline;
+
+        static Board.ClickabilityPipeline Pipeline => _overridePipeline ?? DefaultPipeline;
+
+        public static bool IsClickable(PlayableBoardState board, int x, int y, int layer) =>
+            Pipeline.IsClickable(board, x, y, layer);
+
         public static bool IsClickable(TileKind?[, ,] cells, int x, int y, int layer)
         {
             if (cells == null) return false;

@@ -529,6 +529,7 @@ MonoBehaviour:
   gameFlowManager: {fileID: 284299160}
   orderRackHud: {fileID: 296336690}
   collectFly: {fileID: 1641411319}
+  tileBehaviorRegistry: {fileID: 11400000, guid: 13c154e906ae47f8b1f38500b11cac0e, type: 2}
 --- !u!4 &284299161
 Transform:
   m_ObjectHideFlags: 0

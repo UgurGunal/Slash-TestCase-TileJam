@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Core;
 using DG.Tweening;
 using LevelData;
+using LevelData.Board;
 using UnityEngine;
 
 namespace Presentation
@@ -26,9 +27,13 @@ namespace Presentation
     {
         readonly RectTransform _boardRoot;
         readonly Dictionary<(int x, int y, int layer), BoardTileView> _tiles = new Dictionary<(int x, int y, int layer), BoardTileView>();
+        ClickabilityPipeline _clickability = ClickabilityPipeline.CreateDefault();
 
         public LevelBoardGrid(RectTransform boardRoot) =>
             _boardRoot = boardRoot ?? throw new ArgumentNullException(nameof(boardRoot));
+
+        public void SetClickabilityPipeline(ClickabilityPipeline pipeline) =>
+            _clickability = pipeline ?? ClickabilityPipeline.CreateDefault();
 
         public RectTransform BoardRoot => _boardRoot;
         public PlayableBoardState PlayState { get; private set; }
@@ -51,7 +56,7 @@ namespace Presentation
                 ? visualLayoutOrNull
                 : Resources.Load<LevelBoardVisualLayoutSettings>(LevelBoardVisualLayoutSettings.ResourcesLoadName);
 
-            var cell = LevelBoardVisualLayoutSettings.ResolveCellSize(layout);
+            var cellSize = LevelBoardVisualLayoutSettings.ResolveCellSize(layout);
             var tileScale = LevelBoardVisualLayoutSettings.ResolveTileSizeInCellScale(layout);
             for (var l = 0; l < spec.Depth; l++)
             for (var y = spec.Height - 1; y >= 0; y--)
@@ -59,10 +64,11 @@ namespace Presentation
             {
                 if (!spec.TryGet(x, y, l, out var kind)) continue;
 
+                var boardCell = BoardCell.FromKind(kind);
                 var view = UnityEngine.Object.Instantiate(tilePrefab, _boardRoot);
                 view.gameObject.name = $"Tile_L{l}_R{y}_C{x}";
-                var pos = GridToAnchored(spec.Width, spec.Height, x, y, cell);
-                view.Bind(kind, x, y, l, pos, cell, tileScale, tileIconLibrary);
+                var pos = GridToAnchored(spec.Width, spec.Height, x, y, cellSize);
+                view.Bind(boardCell, x, y, l, pos, cellSize, tileScale, tileIconLibrary);
                 view.SetClickHandler(onTileClicked);
                 _tiles[(x, y, l)] = view;
 
@@ -122,7 +128,8 @@ namespace Presentation
             foreach (var kv in _tiles)
             {
                 var (x, y, l) = kv.Key;
-                var clickable = TileClickability.IsClickable(PlayState, x, y, l);
+                var boardCell = PlayState.GetCell(x, y, l);
+                var clickable = _clickability.IsClickable(PlayState, x, y, l, boardCell);
                 kv.Value.SetClickableVisual(clickable);
             }
         }

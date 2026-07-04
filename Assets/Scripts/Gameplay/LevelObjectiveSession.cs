@@ -2,6 +2,7 @@ using System;
 using Core;
 using Gameplay.Collect;
 using LevelData;
+using LevelData.Board;
 
 namespace Gameplay
 {
@@ -15,13 +16,16 @@ namespace Gameplay
         readonly CollectPipeline _collectPipeline;
         bool _failed;
 
-        public LevelObjectiveSession(LevelOrdersSpec orders, IGameplayEventBus eventBus = null)
+        public LevelObjectiveSession(
+            LevelOrdersSpec orders,
+            IGameplayEventBus eventBus = null,
+            CollectPipeline collectPipeline = null)
         {
             _orderSlots = new ActiveOrderSlots(orders);
             _rack = new RackState();
             _eventBus = eventBus ?? NullGameplayEventBus.Instance;
             _collectContext = new CollectSessionContext(_orderSlots, _rack, NullCollectFlowLogger.Instance, _eventBus);
-            _collectPipeline = CollectPipeline.CreateDefault();
+            _collectPipeline = collectPipeline ?? CollectPipeline.CreateDefault();
 
             _orderSlots.ActiveOrderSlotAdvanced += slot =>
                 _eventBus.Publish(new OrderSlotAdvancedEvent(slot));
@@ -92,9 +96,12 @@ namespace Gameplay
             return true;
         }
 
-        public TileCollectResult TryCollectTile(TileKind kind)
+        public TileCollectResult TryCollectTile(TileKind kind) =>
+            TryCollectTile(BoardCell.FromKind(kind));
+
+        public TileCollectResult TryCollectTile(BoardCell cell)
         {
-            var result = _collectPipeline.Execute(kind, _collectContext);
+            var result = _collectPipeline.Execute(cell, _collectContext);
             _failed = _collectContext.Failed;
             if (result != TileCollectResult.SessionInactive)
                 RaiseStateChanged();

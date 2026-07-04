@@ -1,4 +1,5 @@
 using Gameplay;
+using LevelData.Board;
 using UnityEngine;
 
 namespace Presentation
@@ -14,17 +15,21 @@ namespace Presentation
         [SerializeField] GameFlowManager gameFlowManager;
         [SerializeField] OrderRackHud orderRackHud;
         [SerializeField] TileCollectFly collectFly;
+        [SerializeField] TileBehaviorRegistry tileBehaviorRegistry;
 
         readonly GameplayEventBus _eventBus = new GameplayEventBus();
+        GameplayRulesContext _rulesContext;
 
         public IGameplayEventBus EventBus => _eventBus;
+        public GameplayRulesContext RulesContext => _rulesContext;
 
         void Awake()
         {
             if (!ValidateReferences())
                 return;
 
-            boardLoader.Initialize(_eventBus);
+            _rulesContext = GameplayRulesContext.CreateDefault(tileBehaviorRegistry);
+            boardLoader.Initialize(_eventBus, _rulesContext);
         }
 
         bool ValidateReferences()
