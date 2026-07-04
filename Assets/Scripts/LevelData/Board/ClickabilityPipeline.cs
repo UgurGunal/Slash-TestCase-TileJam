@@ -7,18 +7,14 @@ namespace LevelData.Board
     public sealed class ClickabilityPipeline
     {
         readonly IReadOnlyList<IClickabilityRule> _baseRules;
-        readonly TileBehaviorRegistry _behaviorRegistry;
 
-        public ClickabilityPipeline(
-            IReadOnlyList<IClickabilityRule> baseRules,
-            TileBehaviorRegistry behaviorRegistry = null)
+        public ClickabilityPipeline(IReadOnlyList<IClickabilityRule> baseRules)
         {
             _baseRules = baseRules ?? new IClickabilityRule[] { LayerOcclusionRule.Instance };
-            _behaviorRegistry = behaviorRegistry;
         }
 
-        public static ClickabilityPipeline CreateDefault(TileBehaviorRegistry registry = null) =>
-            new ClickabilityPipeline(new IClickabilityRule[] { LayerOcclusionRule.Instance }, registry);
+        public static ClickabilityPipeline CreateDefault() =>
+            new ClickabilityPipeline(new IClickabilityRule[] { LayerOcclusionRule.Instance });
 
         public bool IsClickable(PlayableBoardState board, int x, int y, int layer)
         {
@@ -37,9 +33,7 @@ namespace LevelData.Board
                     return false;
             }
 
-            if (_behaviorRegistry == null) return true;
-
-            var contributors = _behaviorRegistry.GetClickabilityContributors(cell.BehaviorId);
+            var contributors = TileBehaviorContributorProvider.GetClickabilityContributors(cell.BehaviorId);
             for (var i = 0; i < contributors.Count; i++)
             {
                 var c = contributors[i];

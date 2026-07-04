@@ -1,5 +1,5 @@
 using Gameplay;
-using LevelData.Board;
+using Core;
 using UnityEngine;
 
 namespace Presentation

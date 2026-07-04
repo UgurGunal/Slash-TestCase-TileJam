@@ -1,8 +1,7 @@
 using System.Collections.Generic;
-using Core;
 using UnityEngine;
 
-namespace LevelData.Board
+namespace Core
 {
     [CreateAssetMenu(fileName = "TileBehaviorRegistry", menuName = "Tile Jam/Tile Behavior Registry")]
     public sealed class TileBehaviorRegistry : ScriptableObject
@@ -26,17 +25,6 @@ namespace LevelData.Board
             }
 
             return false;
-        }
-
-        public IReadOnlyList<ITileClickabilityContributor> GetClickabilityContributors(string behaviorId) =>
-            Empty<ITileClickabilityContributor>.List;
-
-        public IReadOnlyList<ITileRemovalPolicy> GetRemovalPolicies(string behaviorId) =>
-            Empty<ITileRemovalPolicy>.List;
-
-        static class Empty<T>
-        {
-            public static readonly IReadOnlyList<T> List = new T[0];
         }
     }
 }

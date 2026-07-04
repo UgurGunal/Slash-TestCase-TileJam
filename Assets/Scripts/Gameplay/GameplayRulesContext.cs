@@ -1,3 +1,4 @@
+using Core;
 using Gameplay.Collect;
 using LevelData.Board;
 
@@ -22,16 +23,16 @@ namespace Gameplay
 
         public static GameplayRulesContext CreateDefault(TileBehaviorRegistry behaviorRegistry = null) =>
             new GameplayRulesContext(
-                ClickabilityPipeline.CreateDefault(behaviorRegistry),
+                ClickabilityPipeline.CreateDefault(),
                 CollectPipeline.CreateDefault(),
                 behaviorRegistry);
 
         public bool CanRemoveFromBoard(BoardCell cell)
         {
-            if (!cell.HasTile || BehaviorRegistry == null)
-                return cell.HasTile;
+            if (!cell.HasTile)
+                return false;
 
-            var policies = BehaviorRegistry.GetRemovalPolicies(cell.BehaviorId);
+            var policies = TileBehaviorContributorProvider.GetRemovalPolicies(cell.BehaviorId);
             for (var i = 0; i < policies.Count; i++)
             {
                 var policy = policies[i];
