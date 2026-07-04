@@ -21,7 +21,7 @@ namespace Presentation.Hud
             _rack = rack;
         }
 
-(TileCollectDestination destination, out RectTransform rect)
+        public bool TryResolve(TileCollectDestination destination, out RectTransform rect)
         {
             rect = null;
             if (destination.Kind == CollectTargetKind.RackSlot)
