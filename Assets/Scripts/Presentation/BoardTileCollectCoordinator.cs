@@ -43,7 +43,7 @@ namespace Presentation
             var x = view.GridX;
             var y = view.GridY;
             var l = view.LayerIndex;
-            if (!ClickabilityService.IsClickable(_grid.PlayState, x, y, l)) return;
+            if (!TileClickability.IsClickable(_grid.PlayState, x, y, l)) return;
 
             if (_collectFly == null || !_collectFly.UseAnimation || _destinationResolver == null)
             {
