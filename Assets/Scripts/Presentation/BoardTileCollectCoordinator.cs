@@ -3,6 +3,7 @@ using Core;
 using Gameplay;
 using LevelData;
 using LevelData.Board;
+using Presentation.Hud;
 using UnityEngine;
 
 namespace Presentation
@@ -27,11 +28,14 @@ namespace Presentation
         public BoardTileCollectCoordinator(LevelBoardGrid grid) =>
             _grid = grid ?? throw new ArgumentNullException(nameof(grid));
 
-        public void SetPresentationRefs(TileCollectFly collectFly, OrderRackHud orderRackHud)
+        public void SetPresentationRefs(TileCollectFly collectFly, OrderRackHud orderRackHud) =>
+            SetPresentationRefs(collectFly, orderRackHud as IHudDestinationLayout);
+
+        public void SetPresentationRefs(TileCollectFly collectFly, IHudDestinationLayout destinationLayout)
         {
             _collectFly = collectFly;
-            _orderRackHud = orderRackHud;
-            _destinationResolver = orderRackHud != null ? new CollectDestinationResolver(orderRackHud) : null;
+            _orderRackHud = destinationLayout as OrderRackHud;
+            _destinationResolver = destinationLayout != null ? new CollectDestinationResolver(destinationLayout) : null;
         }
 
         public void SetGameplayRules(GameplayRulesContext rules) => _rules = rules;
