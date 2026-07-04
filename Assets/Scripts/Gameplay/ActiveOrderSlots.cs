@@ -5,11 +5,18 @@ using LevelData;
 
 namespace Gameplay
 {
+    /// <summary>
+    /// Tracks up to <see cref="GameConstants.ActiveOrderSlotsCount"/> visible customer orders and a queue for the rest.
+    /// Each HUD slot either shows a level order or is idle (<c>-1</c>).
+    /// </summary>
     public sealed class ActiveOrderSlots
     {
         readonly LevelOrdersSpec _orders;
+        /// <summary>Level order indices waiting for a free HUD slot.</summary>
         readonly Queue<int> _pendingOrderIndices = new Queue<int>();
+        /// <summary>Per HUD slot: level order index, or <c>-1</c> when idle (no customer).</summary>
         readonly int[] _slotOrderIndex;
+        /// <summary>Per HUD slot: which icon positions in the current order are collected.</summary>
         readonly bool[][] _slotCellFulfilled;
         int _completedOrders;
 
@@ -21,6 +28,7 @@ namespace Gameplay
             _slotCellFulfilled = new bool[k][];
 
             var n = _orders.OrderCount;
+            // First k level orders fill the HUD slots; extra slots stay idle when the level has fewer orders than k.
             for (var s = 0; s < k; s++)
             {
                 if (s < n)
@@ -30,11 +38,12 @@ namespace Gameplay
                 }
                 else
                 {
-                    _slotOrderIndex[s] = -1;
+                    _slotOrderIndex[s] = -1; // idle: no order to assign
                     _slotCellFulfilled[s] = null;
                 }
             }
 
+            // Remaining level orders wait here until a slot finishes and pulls the next one.
             for (var i = k; i < n; i++)
                 _pendingOrderIndices.Enqueue(i);
         }
@@ -54,7 +63,7 @@ namespace Gameplay
             if ((uint)slot >= (uint)_slotOrderIndex.Length) return false;
 
             var oi = _slotOrderIndex[slot];
-            if (oi < 0) return false;
+            if (oi < 0) return false; // idle slot — no order to read
 
             levelOrderIndex = oi;
             orderSpec = _orders.Orders[oi];
@@ -62,6 +71,7 @@ namespace Gameplay
             return true;
         }
 
+        /// <summary>True when the HUD row exists but has no customer (tiles cannot match this slot).</summary>
         public bool IsSlotIdle(int slot) =>
             (uint)slot < (uint)_slotOrderIndex.Length && _slotOrderIndex[slot] < 0;
 
@@ -75,7 +85,7 @@ namespace Gameplay
             for (var s = 0; s < _slotOrderIndex.Length; s++)
             {
                 var oi = _slotOrderIndex[s];
-                if (oi < 0) continue;
+                if (oi < 0) continue; // skip idle slots
 
                 var order = _orders.Orders[oi];
                 var fulfilled = _slotCellFulfilled[s];
@@ -163,6 +173,7 @@ namespace Gameplay
             return true;
         }
 
+        /// <summary>Pulls the next queued order into <paramref name="slot"/>, or marks the slot idle when the queue is empty.</summary>
         TileCollectResult AdvanceSlotAfterOrderComplete(int slot, ICollectFlowLogger logger)
         {
             _completedOrders++;
@@ -175,6 +186,7 @@ namespace Gameplay
             }
             else
             {
+                // No more customers waiting — this HUD row stays empty until the level ends.
                 _slotOrderIndex[slot] = -1;
                 _slotCellFulfilled[slot] = null;
             }

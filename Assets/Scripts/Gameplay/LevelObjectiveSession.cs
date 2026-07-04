@@ -23,8 +23,7 @@ namespace Gameplay
             _orderSlots = new ActiveOrderSlots(orders);
             _rack = new RackState();
             _eventBus = eventBus ?? NullGameplayEventBus.Instance;
-            CollectFlowLogger = NullCollectFlowLogger.Instance;
-            _collectContext = new CollectSessionContext(_orderSlots, _rack, CollectFlowLogger, _eventBus);
+            _collectContext = new CollectSessionContext(_orderSlots, _rack, NullCollectFlowLogger.Instance, _eventBus);
             _collectPipeline = CollectPipeline.CreateDefault();
 
             _orderSlots.ActiveOrderSlotAdvanced += slot =>
