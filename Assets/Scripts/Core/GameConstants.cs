@@ -5,7 +5,7 @@ namespace Core
     {
         public const int RackCapacity = 6;
 
-        /// <summary>Default: 2 parallel customers (two HUD order strips). Increase for 3+ strips.</summary>
+        /// <summary>Default: 2 parallel active customer order slots.</summary>
         public const int ActiveOrderSlotsCount = 2;
 
         /// <summary>Playable icon types (<see cref="TileKind.Type0"/> … <see cref="TileKind.Type14"/>), excluding <see cref="TileKind.None"/>.</summary>

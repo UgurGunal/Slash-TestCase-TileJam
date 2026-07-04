@@ -6,7 +6,9 @@ using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Presentation
+using Presentation;
+
+namespace LevelEditor
 {
     /// <summary>High-level editor mode: after orders are finalized, the last tile of the last order is held until placed on the rack or board grid.</summary>
     public enum LevelEditorAuthoringPhase

@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Presentation
+namespace LevelEditor
 {
     /// <summary>
     /// Canvas-space grid for authoring: updates UI line images when width/height changes.

@@ -113,7 +113,7 @@ namespace Presentation
             if (_session != null)
             {
                 _session.StateChanged += OnStateChanged;
-                _session.ActiveOrderStripAdvanced += OnActiveOrderStripAdvanced;
+                _session.ActiveOrderSlotAdvanced += OnActiveOrderSlotAdvanced;
             }
 
             EnsureAnimScratch(GameConstants.ActiveOrderSlotsCount);
@@ -126,7 +126,7 @@ namespace Presentation
             if (_session != null)
             {
                 _session.StateChanged -= OnStateChanged;
-                _session.ActiveOrderStripAdvanced -= OnActiveOrderStripAdvanced;
+                _session.ActiveOrderSlotAdvanced -= OnActiveOrderSlotAdvanced;
             }
 
             KillAllStripContainerTweens();
@@ -178,7 +178,7 @@ namespace Presentation
             }
         }
 
-        void OnActiveOrderStripAdvanced(int slot)
+        void OnActiveOrderSlotAdvanced(int slot)
         {
             if (!orderStripCompleteScaleAnimation || _session == null)
                 return;
@@ -445,49 +445,21 @@ namespace Presentation
             return img != null;
         }
 
-        /// <summary>Resolves the UI rect the board icon should fly to (order cell or next rack slot).</summary>
-        public bool TryGetRectTransformForFlyTarget(TileCollectFlyTarget target, out RectTransform rect)
+        public bool TryGetRackSlotImages(out Image[] images)
+        {
+            images = rackSlotImages;
+            return rackSlotImages != null && rackSlotImages.Length > 0;
+        }
+
+        /// <summary>Rect for an order icon cell on an active order slot row.</summary>
+        public bool TryGetOrderIconRectTransform(int activeOrderSlot, int iconIdx, out RectTransform rect)
         {
             rect = null;
             if (_session == null) return false;
-
-            if (target.GoesToRack)
-            {
-                var idx = target.RackSlotIndex;
-                if (idx < 0 || rackSlotImages == null || rackSlotImages.Length == 0) return false;
-                if ((uint)idx < (uint)rackSlotImages.Length && rackSlotImages[idx] != null)
-                {
-                    rect = rackSlotImages[idx].rectTransform;
-                    return true;
-                }
-
-                for (var i = idx; i < rackSlotImages.Length; i++)
-                {
-                    if (rackSlotImages[i] != null)
-                    {
-                        rect = rackSlotImages[i].rectTransform;
-                        return true;
-                    }
-                }
-
-                for (var i = 0; i < idx && i < rackSlotImages.Length; i++)
-                {
-                    if (rackSlotImages[i] != null)
-                    {
-                        rect = rackSlotImages[i].rectTransform;
-                        return true;
-                    }
-                }
-
-                return false;
-            }
-
-            var strip = target.OrderStripIndex;
-            var iconIdx = target.OrderIconIndex;
-            if (!_session.GetActiveSlot(strip, out _, out var order, out _)) return false;
+            if (!_session.GetActiveSlot(activeOrderSlot, out _, out var order, out _)) return false;
             if (iconIdx < 0 || iconIdx >= order.Length) return false;
-            if (orderStrips == null || strip >= orderStrips.Length) return false;
-            var cells = orderStrips[strip].iconImages;
+            if (orderStrips == null || activeOrderSlot >= orderStrips.Length) return false;
+            var cells = orderStrips[activeOrderSlot].iconImages;
             if (cells == null) return false;
             if (iconIdx < cells.Length && cells[iconIdx] != null)
             {

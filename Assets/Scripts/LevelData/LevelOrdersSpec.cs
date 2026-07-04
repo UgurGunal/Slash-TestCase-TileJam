@@ -20,7 +20,7 @@ namespace LevelData
 
         public IReadOnlyList<OrderSpec> Orders { get; }
 
-        /// <summary>Longest order in this level — use to size UI strips (each slot shows up to this many icon cells).</summary>
+        /// <summary>Longest order in this level — used by HUD layout sizing.</summary>
         public int MaxIconsInAnyOrder { get; }
 
         public int OrderCount => Orders.Count;

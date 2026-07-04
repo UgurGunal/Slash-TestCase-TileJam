@@ -6,7 +6,7 @@ using UnityEngine.UI;
 using UnityEditor;
 #endif
 
-namespace Presentation
+namespace LevelEditor
 {
     /// <summary>
     /// UI hook for <see cref="LevelEditorTilePlacementController.TryExportLevelJson"/>. In the Unity Editor, opens a save dialog;
