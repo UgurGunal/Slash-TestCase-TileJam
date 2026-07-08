@@ -7,16 +7,16 @@ namespace Presentation.Hud
     /// <summary>Maps domain <see cref="TileCollectDestination"/> values to HUD <see cref="RectTransform"/> targets.</summary>
     public sealed class HudDestinationLayout : IHudDestinationLayout
     {
-        readonly LevelObjectiveSession _session;
+        readonly IObjectiveHudState _hudState;
         readonly OrderPresenter[] _orders;
         readonly RackPresenter _rack;
 
         public HudDestinationLayout(
-            LevelObjectiveSession session,
+            IObjectiveHudState hudState,
             OrderPresenter[] orders,
             RackPresenter rack)
         {
-            _session = session;
+            _hudState = hudState;
             _orders = orders;
             _rack = rack;
         }
@@ -36,7 +36,7 @@ namespace Presentation.Hud
         public bool TryGetOrderIconRectTransform(int activeOrderSlot, int iconIdx, out RectTransform rect)
         {
             rect = null;
-            if (_session == null || _orders == null) return false;
+            if (_hudState == null || _orders == null) return false;
             if ((uint)activeOrderSlot >= (uint)_orders.Length) return false;
             return _orders[activeOrderSlot].TryGetIconRectTransform(iconIdx, out rect);
         }
@@ -47,16 +47,11 @@ namespace Presentation.Hud
             return _rack != null && _rack.TryGetRackSlotImage(index, out img);
         }
 
-        public bool TryGetRackSlotImages(out Image[] images)
-        {
-            images = null;
-            return _rack != null && _rack.TryGetRackSlotImages(out images);
-        }
-
         bool TryResolveRackSlot(int idx, out RectTransform rect)
         {
             rect = null;
-            if (!TryGetRackSlotImages(out var rackSlotImages) || rackSlotImages == null || rackSlotImages.Length == 0)
+            if (_rack == null || !_rack.TryGetRackSlotImages(out var rackSlotImages) ||
+                rackSlotImages == null || rackSlotImages.Length == 0)
                 return false;
 
             if ((uint)idx < (uint)rackSlotImages.Length && rackSlotImages[idx] != null)

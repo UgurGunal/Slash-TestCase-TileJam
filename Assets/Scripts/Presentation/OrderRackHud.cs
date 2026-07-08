@@ -23,7 +23,7 @@ namespace Presentation
         [FormerlySerializedAs("orderStripCompleteScaleUpEase")]
         [SerializeField] Ease orderCompleteScaleUpEase = Ease.OutBack;
 
-        OrderRackHudBinder _controller;
+        OrderRackHudController _controller;
 
         /// <summary>Live rect resolver for order icons and rack slots; rebuilt when the session or views change.</summary>
         public IHudDestinationLayout DestinationLayout
@@ -59,8 +59,8 @@ namespace Presentation
         {
             if (_controller != null) return true;
 
-            _controller = new OrderRackHudBinder(
-                iconLibrary,
+            _controller = new OrderRackHudController(
+                new TileKindSpriteResolver(iconLibrary),
                 orderCompleteScaleAnimation,
                 orderCompleteScaleDownSec,
                 orderCompleteScaleDownEase,

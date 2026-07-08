@@ -1,11 +1,10 @@
-using Core;
 using Gameplay;
 using UnityEngine;
 
 namespace Presentation
 {
     /// <summary>
-    /// Tracks high-level outcome (playing / won / lost), keeps last stats snapshot, and toggles win vs lose UI.
+    /// Tracks high-level outcome (playing / won / lost) and toggles win vs lose UI.
     /// Subscribes to <see cref="IGameplayEventBus"/> for victory and rack-full outcomes.
     /// </summary>
     public sealed class GameFlowManager : MonoBehaviour
@@ -24,11 +23,6 @@ namespace Presentation
         LevelObjectiveSession _session;
         IGameplayEventBus _eventBus;
         bool _outcomeHandled;
-
-        public GamePhase Phase { get; private set; } = GamePhase.Idle;
-        public GameStatsSnapshot LastOutcomeStats { get; private set; }
-
-        public int CurrentLevelNumber => boardLoader != null ? boardLoader.CurrentLevelNumber : 0;
 
         public LevelBoardLoader BoardLoader => boardLoader;
 
@@ -63,7 +57,6 @@ namespace Presentation
             _session = session;
             _eventBus = boardLoader != null ? boardLoader.GameplayEventBus : null;
             _outcomeHandled = false;
-            Phase = session != null ? GamePhase.Playing : GamePhase.Idle;
 
             if (_eventBus != null)
             {
@@ -91,8 +84,6 @@ namespace Presentation
         {
             if (_outcomeHandled || _session == null) return;
             _outcomeHandled = true;
-            Phase = GamePhase.Won;
-            LastOutcomeStats = GameStatsSnapshot.FromSession(_session);
             SetEndPanels(win: true, lose: false);
         }
 
@@ -100,8 +91,6 @@ namespace Presentation
         {
             if (_outcomeHandled || _session == null) return;
             _outcomeHandled = true;
-            Phase = GamePhase.LostRackFull;
-            LastOutcomeStats = GameStatsSnapshot.FromSession(_session);
             SetEndPanels(win: false, lose: true);
         }
 
@@ -136,14 +125,5 @@ namespace Presentation
             SetEndPanels(win: false, lose: false);
             boardLoader.TryLoadNextLevel();
         }
-
-        public bool HasNextLevel()
-        {
-            if (boardLoader == null || !boardLoader.UsesNumberedResourcesLevels) return false;
-            var path = boardLoader.BuildNumberedLevelResourcesPathForIndex(boardLoader.CurrentLevelNumber + 1);
-            return Resources.Load<TextAsset>(path) != null;
-        }
-
-        public GameStatsSnapshot GetLiveStats() => GameStatsSnapshot.FromSession(_session);
     }
 }

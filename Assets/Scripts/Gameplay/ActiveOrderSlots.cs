@@ -50,8 +50,6 @@ namespace Gameplay
 
         public event Action<int> ActiveOrderSlotAdvanced;
 
-        public int CompletedOrders => _completedOrders;
-        public int TotalOrders => _orders.OrderCount;
         public bool HasWon => _completedOrders >= _orders.OrderCount;
         public int MaxOrderIconsOnLevel => _orders.MaxIconsInAnyOrder;
 

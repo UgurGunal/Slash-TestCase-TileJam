@@ -407,9 +407,9 @@ namespace Presentation
         bool TryResolveDestination(TileCollectDestination destination, out RectTransform rect)
         {
             rect = null;
-            var layout = _orderRackHud?.DestinationLayout;
+            var layout = _orderRackHud?.DestinationLayout as HudDestinationLayout;
             if (layout == null) return false;
-            return new CollectDestinationResolver(layout).TryResolve(destination, out rect);
+            return layout.TryResolve(destination, out rect);
         }
 
         bool TryGetRackSlotImage(int rackIdx, out Image rackImg)

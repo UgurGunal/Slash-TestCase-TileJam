@@ -7,7 +7,7 @@ using LevelData.Board;
 namespace Gameplay
 {
     /// <summary>Facade for order queue, rack, and board collect rules.</summary>
-    public sealed class LevelObjectiveSession : IRackDrainHost
+    public sealed class LevelObjectiveSession : IRackDrainHost, IObjectiveHudState
     {
         readonly ActiveOrderSlots _orderSlots;
         readonly RackState _rack;
@@ -42,12 +42,6 @@ namespace Gameplay
 
         public event Action StateChanged;
 
-        public event Action<int> ActiveOrderSlotAdvanced
-        {
-            add => _orderSlots.ActiveOrderSlotAdvanced += value;
-            remove => _orderSlots.ActiveOrderSlotAdvanced -= value;
-        }
-
         RackState IRackDrainHost.Rack => _rack;
         ActiveOrderSlots IRackDrainHost.OrderSlots => _orderSlots;
         ICollectFlowLogger IRackDrainHost.CollectFlowLogger => CollectFlowLogger;
@@ -56,9 +50,6 @@ namespace Gameplay
 
         public bool HasFailed => _failed || _collectContext.Failed;
         public bool HasWon => _orderSlots.HasWon;
-        public int RackUsedCount => _rack.Count;
-        public int CompletedOrderCount => _orderSlots.CompletedOrders;
-        public int TotalOrderCount => _orderSlots.TotalOrders;
         public int MaxOrderIconsOnLevel => _orderSlots.MaxOrderIconsOnLevel;
 
         public TileKind? GetRackSlot(int index) => _rack.GetSlot(index);
@@ -68,12 +59,23 @@ namespace Gameplay
 
         public bool IsSlotIdle(int slot) => _orderSlots.IsSlotIdle(slot);
 
+        bool IObjectiveHudState.IsOrderSlotIdle(int hudSlotIndex) => IsSlotIdle(hudSlotIndex);
+
+        public bool TryGetOrderRow(int hudSlotIndex, out ObjectiveHudRowView row)
+        {
+            if (GetActiveSlot(hudSlotIndex, out var levelOrderIndex, out var orderSpec, out var cellsFulfilled))
+            {
+                row = new ObjectiveHudRowView(levelOrderIndex, orderSpec, cellsFulfilled);
+                return true;
+            }
+
+            row = default;
+            return false;
+        }
+
         public void NotifyStateChanged() => RaiseStateChanged();
 
         void IRackDrainHost.RaiseStateChanged() => RaiseStateChanged();
-
-        public bool TryPeekCollectDestination(TileKind kind, out TileCollectDestination destination, out TileCollectResult failureReason) =>
-            _reservations.TryPeekDestination(_collectContext, kind, out destination, out failureReason);
 
         /// <summary>
         /// Reserves a projected collect destination (order icon or rack slot) for an in-flight transaction.

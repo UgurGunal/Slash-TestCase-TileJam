@@ -49,7 +49,6 @@ namespace Presentation
         public OrderRackHud OrderRackHud => orderRackHud;
         public TileCollectFly CollectFly => collectFly;
         public int CurrentLevelNumber { get; private set; } = 1;
-        public bool UsesNumberedResourcesLevels => levelJson == null;
 
         public event Action<LevelObjectiveSession> SessionAssigned;
 
@@ -225,9 +224,15 @@ namespace Presentation
             if (levelJson == null && TryParseLevelNumberFromResourcesPath(resourcesLevelPath, out var parsedLevel))
                 CurrentLevelNumber = parsedLevel;
 
-            var rackCapacity = layoutConfig != null ? layoutConfig.RackCapacity : GameConstants.RackCapacity;
-            var activeOrderSlotCount = layoutConfig != null ? layoutConfig.ActiveOrderSlotCount : GameConstants.ActiveOrderSlotsCount;
-            _session = new LevelObjectiveSession(definition.Orders, _gameplayEventBus, _rulesContext.Collect, rackCapacity, activeOrderSlotCount)
+            var layout = layoutConfig != null
+                ? layoutConfig.CreateLayoutSpec()
+                : new ObjectiveLayoutSpec(GameConstants.RackCapacity, GameConstants.ActiveOrderSlotsCount);
+            _session = new LevelObjectiveSession(
+                definition.Orders,
+                _gameplayEventBus,
+                _rulesContext.Collect,
+                layout.RackCapacity,
+                layout.ActiveOrderSlotCount)
             {
                 CollectFlowLogger = new UnityCollectFlowLogger { IsEnabled = logTileCollectFlow }
             };

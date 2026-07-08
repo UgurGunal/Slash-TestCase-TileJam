@@ -1,25 +1,24 @@
-using Core;
 using Gameplay;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace Presentation.Hud
 {
-    /// <summary>Rack slot image refresh for collected non-matching tiles.</summary>
+    /// <summary>Maps <see cref="IObjectiveHudState"/> rack slots onto rack slot images.</summary>
     public sealed class RackPresenter
     {
         readonly Image[] _rackSlotImages;
-        readonly TileIconLibrary _iconLibrary;
+        readonly TileKindSpriteResolver _sprites;
 
-        public RackPresenter(Image[] rackSlotImages, TileIconLibrary iconLibrary)
+        public RackPresenter(Image[] rackSlotImages, TileKindSpriteResolver sprites)
         {
             _rackSlotImages = rackSlotImages;
-            _iconLibrary = iconLibrary;
+            _sprites = sprites;
         }
 
-        public void Refresh(LevelObjectiveSession session)
+        public void Refresh(IObjectiveHudState state)
         {
-            if (session == null) return;
+            if (state == null) return;
 
             var count = _rackSlotImages?.Length ?? 0;
             for (var i = 0; i < count; i++)
@@ -27,15 +26,17 @@ namespace Presentation.Hud
                 var img = _rackSlotImages[i];
                 if (img == null) continue;
 
-                var slot = session.GetRackSlot(i);
+                var slot = state.GetRackSlot(i);
                 if (!slot.HasValue)
                 {
                     img.enabled = false;
                     continue;
                 }
 
-                img.enabled = true;
-                ApplySprite(img, slot.Value);
+                var sprite = _sprites.Resolve(slot.Value);
+                img.sprite = sprite;
+                img.enabled = sprite != null;
+                img.color = Color.white;
             }
         }
 
@@ -51,19 +52,6 @@ namespace Presentation.Hud
         {
             images = _rackSlotImages;
             return _rackSlotImages != null && _rackSlotImages.Length > 0;
-        }
-
-        void ApplySprite(Image img, TileKind kind)
-        {
-            Sprite sprite = null;
-            if (_iconLibrary != null && _iconLibrary.TryGetSprite(kind, out var fromLib))
-                sprite = fromLib;
-            if (sprite == null)
-                sprite = Resources.Load<Sprite>($"{BoardTileView.TileIconsResourcesFolder}/{kind}");
-
-            img.sprite = sprite;
-            img.enabled = sprite != null;
-            img.color = Color.white;
         }
     }
 }

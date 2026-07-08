@@ -1,21 +1,18 @@
-using Core;
 using DG.Tweening;
 using Gameplay;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace Presentation.Hud
 {
     /// <summary>
-    /// Presentation for one active customer order. Resolves sprites and issues high-level commands
-    /// to the <see cref="OrderView"/> (which owns per-slot icon/tick state), plus the
-    /// advance animation when the customer changes.
+    /// Presentation for one active customer order. Maps <see cref="IObjectiveHudState"/> rows onto
+    /// <see cref="OrderView"/> commands and plays the advance animation when the customer changes.
     /// </summary>
     public sealed class OrderPresenter
     {
         readonly int _orderIndex;
         readonly OrderView _view;
-        readonly TileIconLibrary _iconLibrary;
+        readonly TileKindSpriteResolver _sprites;
         readonly bool _scaleAnimationEnabled;
         readonly float _scaleDownSec;
         readonly Ease _scaleDownEase;
@@ -28,7 +25,7 @@ namespace Presentation.Hud
         public OrderPresenter(
             int orderIndex,
             OrderView view,
-            TileIconLibrary iconLibrary,
+            TileKindSpriteResolver sprites,
             bool scaleAnimationEnabled,
             float scaleDownSec,
             Ease scaleDownEase,
@@ -37,7 +34,7 @@ namespace Presentation.Hud
         {
             _orderIndex = orderIndex;
             _view = view;
-            _iconLibrary = iconLibrary;
+            _sprites = sprites;
             _scaleAnimationEnabled = scaleAnimationEnabled;
             _scaleDownSec = scaleDownSec;
             _scaleDownEase = scaleDownEase;
@@ -48,8 +45,6 @@ namespace Presentation.Hud
 
         RectTransform Container => _view != null ? _view.Container : null;
 
-        public bool SkipRefreshDuringRoll => _skipRefreshDuringRoll;
-
         public void CacheContainerBaseScale()
         {
             if (Container != null)
@@ -58,28 +53,28 @@ namespace Presentation.Hud
 
         public void KillTweens() => Container?.DOKill(false);
 
-        public void Refresh(LevelObjectiveSession session, int stride)
+        public void Refresh(IObjectiveHudState state, int stride)
         {
-            if (session == null || _view == null || _skipRefreshDuringRoll) return;
+            if (state == null || _view == null || _skipRefreshDuringRoll) return;
+
+            state.TryGetOrderRow(_orderIndex, out var row);
 
             for (var i = 0; i < stride; i++)
             {
-                if (!session.GetActiveSlot(_orderIndex, out _, out var order, out var fulfilled) || i >= order.Length)
+                if (!row.IsActive || i >= row.IconCount)
                 {
                     _view.ClearSlot(i);
                     continue;
                 }
 
-                var kind = order.GetIcon(i);
-                var cellDone = fulfilled != null && i < fulfilled.Length && fulfilled[i];
-                _view.SetSlotIcon(i, ResolveSprite(kind), cellDone);
+                _view.SetSlotIcon(i, _sprites.Resolve(row.GetIcon(i)), row.IsFulfilled(i));
             }
         }
 
-        public void PlayAdvanceAnimation(LevelObjectiveSession session, int stride)
+        public void PlayAdvanceAnimation(IObjectiveHudState state, int stride)
         {
             var container = Container;
-            if (!_scaleAnimationEnabled || session == null || container == null) return;
+            if (!_scaleAnimationEnabled || state == null || container == null) return;
 
             container.DOKill(false);
             _skipRefreshDuringRoll = true;
@@ -99,7 +94,7 @@ namespace Presentation.Hud
                     // Clear the guard first: Refresh() early-returns while it is set, so the new
                     // customer's icons would otherwise never populate until the next collect.
                     _skipRefreshDuringRoll = false;
-                    Refresh(session, stride);
+                    Refresh(state, stride);
                     container.DOScale(_containerBaseScale, up).SetEase(_scaleUpEase);
                 });
         }
@@ -108,15 +103,6 @@ namespace Presentation.Hud
         {
             rect = null;
             return _view != null && _view.TryGetSlotRect(iconIdx, out rect);
-        }
-
-        public Image FirstNonNullIcon() => _view != null ? _view.FirstIconImage() : null;
-
-        Sprite ResolveSprite(TileKind kind)
-        {
-            if (_iconLibrary != null && _iconLibrary.TryGetSprite(kind, out var fromLib) && fromLib != null)
-                return fromLib;
-            return Resources.Load<Sprite>($"{BoardTileView.TileIconsResourcesFolder}/{kind}");
         }
     }
 }

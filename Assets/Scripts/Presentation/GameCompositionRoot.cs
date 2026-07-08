@@ -22,9 +22,6 @@ namespace Presentation
         readonly GameplayEventBus _eventBus = new GameplayEventBus();
         GameplayRulesContext _rulesContext;
 
-        public IGameplayEventBus EventBus => _eventBus;
-        public GameplayRulesContext RulesContext => _rulesContext;
-
         void Awake()
         {
             if (!ValidateReferences())

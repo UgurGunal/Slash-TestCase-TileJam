@@ -1,10 +1,11 @@
+using Gameplay;
 using UnityEngine;
 
 namespace Presentation.Hud
 {
     /// <summary>
     /// Single source of truth for HUD slot counts and the prefabs used to build them.
-    /// Read by <see cref="OrderRackHudBuilder"/> (visuals) and by the level loader (gameplay capacity).
+    /// Read by <see cref="OrderRackHudBuilder"/> (visuals) and by the level loader via <see cref="CreateLayoutSpec"/> (gameplay capacity).
     /// </summary>
     [CreateAssetMenu(menuName = "TileJam/Hud Layout Config", fileName = "HudLayoutConfig")]
     public sealed class HudLayoutConfig : ScriptableObject
@@ -21,6 +22,9 @@ namespace Presentation.Hud
 
         public int RackCapacity => Mathf.Max(1, rackCapacity);
         public int ActiveOrderSlotCount => Mathf.Max(1, activeOrderSlotCount);
+
+        public ObjectiveLayoutSpec CreateLayoutSpec() =>
+            new ObjectiveLayoutSpec(RackCapacity, ActiveOrderSlotCount);
 
         public OrderView OrderPrefab => orderPrefab;
         public OrderSlotView OrderSlotPrefab => orderSlotPrefab;

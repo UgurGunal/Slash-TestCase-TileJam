@@ -12,42 +12,6 @@ namespace Gameplay.Collect
     {
         readonly CollectReservationBook _book = new CollectReservationBook();
 
-        public int OutstandingCount => _book.Count;
-
-        /// <summary>
-        /// Non-mutating: where <paramref name="kind"/> would go if collected now, accounting for in-flight reservations.
-        /// </summary>
-        public bool TryPeekDestination(
-            CollectSessionContext context,
-            TileKind kind,
-            out TileCollectDestination destination,
-            out TileCollectResult failureReason)
-        {
-            destination = default;
-            failureReason = TileCollectResult.ConsumedForOrder;
-
-            if (context.IsInactive)
-            {
-                failureReason = TileCollectResult.SessionInactive;
-                return false;
-            }
-
-            if (TryFindProjectedOrderMatch(context, kind, out var slot, out var iconIdx))
-            {
-                destination = TileCollectDestination.ForOrderSlot(slot, iconIdx);
-                return true;
-            }
-
-            if (ProjectedRackIsFull(context))
-            {
-                failureReason = TileCollectResult.FailedRackFull;
-                return false;
-            }
-
-            destination = TileCollectDestination.ForRackSlot(ProjectedRackCount(context));
-            return true;
-        }
-
         /// <summary>
         /// Reserves a projected collect destination (order icon or rack slot) for an in-flight transaction.
         /// Returns false when the session is inactive or the projected rack is full.

@@ -987,9 +987,8 @@ namespace LevelEditor
         }
 
         /// <summary>
-        /// When re-finalizing after unlock on an existing level, append brand-new live order columns
-        /// to the snapshot. Existing snapshot columns are left untouched so board provenance stays valid.
-        /// Merges live strips with board/rack tiles so orders already placed on the board are captured.
+        /// When re-finalizing after unlock on an existing level, reconcile every live order column
+        /// (including edits to existing orders) with board/rack tiles, then append brand-new columns.
         /// </summary>
         void AppendNewLiveColumnsToSnapshot(
             IReadOnlyList<(TileKind kind, int orderCol, int orderIcon)> boardAndRackTiles)
@@ -1005,7 +1004,7 @@ namespace LevelEditor
                 for (var i = 0; i < boardAndRackTiles.Count; i++)
                 {
                     var (kind, orderCol, orderIcon) = boardAndRackTiles[i];
-                    if (kind == TileKind.None || orderCol < snapshotCount) continue;
+                    if (kind == TileKind.None || orderCol < 0) continue;
 
                     maxBoardCol = Mathf.Max(maxBoardCol, orderCol);
                     if (!boardByCol.TryGetValue(orderCol, out var list))
@@ -1018,32 +1017,27 @@ namespace LevelEditor
                 }
             }
 
+            for (var c = 0; c < snapshotCount; c++)
+            {
+                var kinds = new List<TileKind>();
+                var icons = new List<int>();
+                MergeLiveAndBoardColumn(c, boardByCol, kinds, icons);
+                _snapshotAtFinalize[c] = new List<TileKind>(kinds);
+                if (c < _liveSnapIcons.Count)
+                {
+                    var liveIcons = _liveSnapIcons[c];
+                    liveIcons.Clear();
+                    for (var i = 0; i < kinds.Count; i++)
+                        liveIcons.Add(i);
+                }
+            }
+
             var maxCol = Mathf.Max(_columns.Count - 1, maxBoardCol);
             for (var c = snapshotCount; c <= maxCol; c++)
             {
                 var kinds = new List<TileKind>();
                 var icons = new List<int>();
-
-                if (c < _columns.Count && _columns[c] != null)
-                {
-                    kinds.AddRange(_columns[c]);
-                    if (c < _liveSnapIcons.Count)
-                        icons.AddRange(_liveSnapIcons[c]);
-                    else
-                    {
-                        for (var i = 0; i < kinds.Count; i++)
-                            icons.Add(i);
-                    }
-                }
-
-                if (boardByCol.TryGetValue(c, out var boardTiles))
-                {
-                    for (var t = 0; t < boardTiles.Count; t++)
-                    {
-                        var (kind, orderIcon) = boardTiles[t];
-                        MergeBoardTileIntoColumn(kinds, icons, kind, orderIcon);
-                    }
-                }
+                MergeLiveAndBoardColumn(c, boardByCol, kinds, icons);
 
                 if (kinds.Count == 0) continue;
 
@@ -1066,6 +1060,38 @@ namespace LevelEditor
 
             CompactMutableOrderColumns();
             EnsureAtLeastOneColumn();
+        }
+
+        void MergeLiveAndBoardColumn(
+            int columnIndex,
+            Dictionary<int, List<(TileKind kind, int orderIcon)>> boardByCol,
+            List<TileKind> kinds,
+            List<int> icons)
+        {
+            kinds.Clear();
+            icons.Clear();
+
+            if (columnIndex < _columns.Count && _columns[columnIndex] != null)
+            {
+                kinds.AddRange(_columns[columnIndex]);
+                if (columnIndex < _liveSnapIcons.Count)
+                    icons.AddRange(_liveSnapIcons[columnIndex]);
+                else
+                {
+                    for (var i = 0; i < kinds.Count; i++)
+                        icons.Add(i);
+                }
+            }
+
+            if (boardByCol != null &&
+                boardByCol.TryGetValue(columnIndex, out var boardTiles))
+            {
+                for (var t = 0; t < boardTiles.Count; t++)
+                {
+                    var (kind, orderIcon) = boardTiles[t];
+                    MergeBoardTileIntoColumn(kinds, icons, kind, orderIcon);
+                }
+            }
         }
 
         void RestoreColumnsFromSnapshot()

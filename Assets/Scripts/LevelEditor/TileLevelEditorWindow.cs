@@ -715,9 +715,9 @@ namespace LevelEditor
         void HandleBoardRightClick(int px, int py)
         {
             if (!CanInteractWithBoard()) return;
-            if (_placeMode == PlaceMode.Remove) return;
-            if (!_board.TryRemoveTopAt(px, py)) return;
-            _validationMessage = "";
+            // Same as Remove tool: never hard-delete — tiles must return to their order slot
+            // so the board multiset stays in sync with the export snapshot.
+            RemoveTopTileGameLike(px, py);
         }
 
         /// <summary>Only the topmost tile at a cell that isn't covered by an overlapping neighbour can be removed.</summary>
@@ -891,7 +891,7 @@ namespace LevelEditor
 
             _pendingOrderTilesScratch.Clear();
             if (_orders.HasOrderSnapshot)
-                _board.CollectTilesOriginatingFromOrderColumnAtLeast(_orders.SnapshotOrderCount, _pendingOrderTilesScratch);
+                _board.CollectTilesOriginatingFromOrderColumnAtLeast(0, _pendingOrderTilesScratch);
 
             _orders.Finalize(_pendingOrderTilesScratch);
             MaintainOrderColumnIndices();
@@ -1065,6 +1065,15 @@ namespace LevelEditor
                 return;
             }
 
+            if (!_orders.AreAllColumnsEmpty())
+            {
+                EditorUtility.DisplayDialog(
+                    "Export blocked",
+                    "Order strips still have tiles. Place every remaining order tile on the board before export.",
+                    "OK");
+                return;
+            }
+
             if (!_orders.TryGetSnapshotOrdersForExport(out var ordersDto, out var ordersErr))
             {
                 EditorUtility.DisplayDialog("Export failed", ordersErr, "OK");
@@ -1106,9 +1115,30 @@ namespace LevelEditor
                 if (_orders.HasOrderSnapshot)
                     _board.CollectTilesOriginatingFromOrderColumnAtLeast(_orders.SnapshotOrderCount, _pendingOrderTilesScratch);
 
-                var message = _pendingOrderTilesScratch.Count > 0
-                    ? "Board tiles do not match the export snapshot. New order tiles are on the board but were not captured — click Finalize orders, then export again."
-                    : "Board tiles do not match the orders. Place every order/rack tile back on the board (or remove extras) so the counts match.";
+                string message;
+                if (_pendingOrderTilesScratch.Count > 0)
+                {
+                    message =
+                        "Board tiles do not match the export snapshot. New order tiles are on the board but were not captured — click Finalize orders, then export again.";
+                }
+                else if (boardKinds.Count < orderFlat.Count)
+                {
+                    message =
+                        $"Board has {boardKinds.Count} tiles but orders require {orderFlat.Count}. " +
+                        "Some tiles may have been deleted (old right-click) or never placed. Use Remove all, then place everything again.";
+                }
+                else if (boardKinds.Count > orderFlat.Count)
+                {
+                    message =
+                        $"Board has {boardKinds.Count} tiles but orders only expect {orderFlat.Count}. " +
+                        "Extra board tiles exist — click Edit orders → Finalize orders after syncing, or remove extras with the Remove tool.";
+                }
+                else
+                {
+                    message =
+                        "Board tile kinds do not match the orders (same count, different icons). " +
+                        "Use Remove all, then place tiles from the order strips again.";
+                }
 
                 EditorUtility.DisplayDialog("Export failed", message, "OK");
                 return;

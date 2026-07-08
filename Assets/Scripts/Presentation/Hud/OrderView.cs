@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace Presentation.Hud
 {
@@ -15,7 +14,6 @@ namespace Presentation.Hud
         OrderSlotView[] _slots;
 
         public RectTransform Container => container != null ? container : transform as RectTransform;
-        public int SlotCount => _slots?.Length ?? 0;
 
         public void BuildSlots(OrderSlotView prefab, int count)
         {
@@ -43,7 +41,6 @@ namespace Presentation.Hud
         // High-level commands used by the presenter / gameplay-facing code.
         public void SetSlotIcon(int index, Sprite sprite, bool completed) => GetSlot(index)?.SetIcon(sprite, completed);
         public void ClearSlot(int index) => GetSlot(index)?.Clear();
-        public void CompleteSlot(int index) => GetSlot(index)?.SetCompleted(true);
 
         /// <summary>
         /// Marks every slot that currently shows an icon as completed. Used to flash the finished
@@ -78,18 +75,6 @@ namespace Presentation.Hud
             }
 
             return false;
-        }
-
-        public Image FirstIconImage()
-        {
-            if (_slots == null) return null;
-            for (var i = 0; i < _slots.Length; i++)
-            {
-                if (_slots[i] != null && _slots[i].IconImage != null)
-                    return _slots[i].IconImage;
-            }
-
-            return null;
         }
     }
 }

@@ -1,179 +1,205 @@
 # Proje Mimarisi
 
-Bu doküman projenin genel mimarisini ve sistemlerin nasıl çalıştığını basit bir dille anlatır. Katman yapısı, oyun akışı, tile toplama (collect) sistemi ve Order/Rack HUD gibi ana sistemleri kapsar.
+Bu doküman, projeye yeni gelen biri için yazıldı. Oyunun ne yaptığını, kodun hangi parçalara ayrıldığını ve bir tile tıklandığında neler olduğunu anlatır.
+
+## Oyunu 30 saniyede anlamak
+
+Oyuncu tahtadaki **tile**'lara tıklar. Tıklanan tile:
+
+1. **Order** (müşteri siparişi) satırındaki uygun bir ikona gidebilir — siparişteki tüm ikonlar dolunca o müşteri tamamlanır, sıradaki müşteri gelir.
+2. Uygun order yoksa **rack**'e (geçici depo) gider — rack dolarsa level kaybedilir.
+
+Ekranın üstünde aktif siparişler ve rack görünür (**HUD**). Tahta ve level verisi JSON dosyasından yüklenir.
 
 ---
 
-## Genel bakış
+## Katman mimarisi
 
-TileJam, tahtadaki (board) tile'lara tıklayıp bunları müşteri siparişlerine (order) veya geçici bir depoya (rack) toplama üzerine kurulu bir puzzle oyunu.
-
-Ana sistemler:
-
-- **Board / Level yükleme** — JSON'dan level okunur, tahta runtime'da kurulur.
-- **Collect (tile toplama)** — tıklanan tile bir order ikonuna veya rack slotuna gider; rack dolarsa level başarısız olur.
-- **Order / Rack HUD** — aktif siparişler ve rack durumu ekranda gösterilir.
-- **Level Editor** — tahtayı editörde düzenleme araçları.
-
----
-
-## Katman mimarisi (assembly'ler)
-
-Proje beş assembly'ye (asmdef) bölünmüş. Bağımlılıklar tek yönlü akar; alttaki katman üsttekini bilmez.
+Kod beş **assembly** (derleme birimi) içinde. Ok tuşu **aşağı = temel**, **yukarı = o temele dayanan üst katman** demek. Level Editor en üstte çünkü oyunu çalıştırmaz; diğer katmanları *kullanan* bir araçtır — temel değildir.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  TileJam.LevelEditor   (Editor araçları)                   │
-│      → Core, LevelData, Presentation                       │
-└──────────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────┐
-│  TileJam.Presentation  (Unity/MonoBehaviour, UI, animasyon)│
-│      → Core, LevelData, Gameplay                           │
-└──────────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────┐
-│  TileJam.Gameplay      (SAF C# oyun mantığı, engine yok)   │
-│      → Core, LevelData                                     │
-└──────────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────┐
-│  TileJam.LevelData     (level şeması, JSON parse)          │
-│      → Core                                                │
-└──────────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────────────────────────┐
-│  TileJam.Core          (sabitler, TileKind, event bus)     │
-│      → (bağımlılık yok)                                    │
-└──────────────────────────────────────────────────────────┘
+                    ┌─────────────────────────────┐
+   en üst (araç)    │  TileJam.LevelEditor        │
+                    │  Unity editör penceresi     │
+                    └──────────────┬──────────────┘
+                                   │ kullanır
+                    ┌──────────────▼──────────────┐
+   oyun sahnesi     │  TileJam.Presentation       │
+                    │  UI, animasyon, MonoBehaviour│
+                    └──────────────┬──────────────┘
+                                   │ kullanır
+                    ┌──────────────▼──────────────┐
+   oyun kuralları   │  TileJam.Gameplay           │
+                    │  saf C# — Unity yok         │
+                    └──────────────┬──────────────┘
+                                   │ kullanır
+                    ┌──────────────▼──────────────┐
+   level verisi     │  TileJam.LevelData          │
+                    │  JSON şeması, parse         │
+                    └──────────────┬──────────────┘
+                                   │ kullanır
+                    ┌──────────────▼──────────────┐
+   temel            │  TileJam.Core               │
+                    │  TileKind, sabitler, event  │
+                    └─────────────────────────────┘
 ```
 
-**Önemli nokta:** `TileJam.Gameplay` ve `TileJam.LevelData`, `noEngineReferences: true` ile işaretli — yani hiçbir UnityEngine tipine bağlı değiller. Tüm order/rack/collect kuralları saf C#. Bu sayede oyun mantığı Unity'den bağımsız düşünülebilir ve (istenirse) düz unit test ile denenebilir. UI ve animasyon gibi Unity'ye bağlı her şey `Presentation` katmanında durur.
+### Her katman ne yapar?
+
+| Katman | Düz Türkçe | Örnek sınıflar / dosyalar |
+|--------|------------|---------------------------|
+| **Core** | Herkesin ortak kullandığı temel tipler ve sabitler | `TileKind`, `GameConstants`, event bus |
+| **LevelData** | Level JSON'unun okunması ve doğrulanması; Unity'den bağımsız | `LevelGridParser`, `OrderSpec`, `BoardCell` |
+| **Gameplay** | Oyun kuralları: order doluyor mu, rack dolu mu, collect nereye gider | `LevelObjectiveSession`, `ActiveOrderSlots`, `RackState` |
+| **Presentation** | Oyuncunun gördüğü her şey: tahta, HUD, uçuş animasyonu | `LevelBoardLoader`, `OrderRackHud`, `BoardTileView` |
+| **LevelEditor** | Level yazma aracı; runtime oyunu değil, editör penceresi | `TileLevelEditorWindow` |
+
+**Neden Gameplay Unity'den ayrı?** `Gameplay` ve `LevelData` içinde `UnityEngine` kullanılmaz (`noEngineReferences: true`). Böylece order/rack kuralları saf C# kalır; istenirse Unity açmadan test edilebilir. Buton, Image, DOTween gibi şeyler yalnızca `Presentation`'dadır.
+
+**Presentation ↔ Gameplay sınırı:** Gameplay state değiştirir ve event yayınlar. Presentation event'i dinler, ekranı günceller. HUD, `IObjectiveHudState` ile yalnızca *okuma* yapar; tile toplama kuralını bilmez.
 
 ---
 
-## Oyun akışı (uçtan uca)
+## Uçtan uca akış (oyun açılınca)
 
-1. **Awake (-200):** `OrderRackHudBuilder` → `HudLayoutConfig`'i okur, order/rack prefab'larını spawn eder, `OrderRackHud`'a view'ları verir.
-2. **Awake (-100):** `GameCompositionRoot` → `LevelBoardLoader`'ı initialize eder.
-3. **Reload:** `LevelBoardLoader` → level JSON yükler, `LevelObjectiveSession` oluşturur (config'teki slot sayılarını kullanır), `OrderRackHud.BindSession` çağırır, tahtayı kurar.
-4. **Tile tıklama:** `BoardTileCollectCoordinator` → session'a collect uygular, tile uçuş animasyonu için `OrderRackHud.DestinationLayout` üzerinden hedef Rect bulur.
-5. **Event:** Session event yayınlar → `OrderRackHudBinder` → presenter'lar view'ları günceller.
+1. **Awake (-200):** `OrderRackHudBuilder` — `HudLayoutConfig`'ten kaç order satırı / rack slotu olacağını okur, prefab'ları spawn eder.
+2. **Awake (-100):** `GameCompositionRoot` — `LevelBoardLoader`'ı hazırlar.
+3. **Reload:** `LevelBoardLoader` — `Assets/Resources/Levels/*.json` yükler, `LevelObjectiveSession` oluşturur, HUD'a bağlar, tahtayı kurar.
+4. **Tile tıklama:** `BoardTileCollectCoordinator` — hedefi hesaplar, uçuş animasyonunu başlatır, session'a collect uygular.
+5. **HUD güncelleme:** Session event yayınlar → `OrderRackHudController` → presenter'lar ikonları ve rack'i ekrana yansıtır.
 
 ---
 
-## Collect (tile toplama) akışı
+## Collect (tile toplama)
 
-Bir tile'a tıklandığında ne olacağını yöneten sistem. Girdi (`BoardTileView` tıklaması) → oyun kuralı (order eşleşmesi / rack) → görsel geri bildirim (uçuş animasyonu) → rack→order otomatik drenajı.
+Tile tıklanınca sıra: **rezerve et → uçur → commit et → gerekirse rack'ten order'a aktar**.
 
-Rezervasyon/transaction katmanı sayesinde birden fazla tile aynı anda uçabilir. Projeksiyon durumu = commit edilmiş durum + uçuştaki (in-flight) rezervasyonlar.
-
-Akış:
+Birden fazla tile aynı anda uçabilir. Her uçuş gitmeden önce hedef slotunu **rezerve** eder; böylece iki tile aynı order ikonuna veya aynı rack slotuna yazılmaz. "Rack dolu mu?" sorusu sadece yerleşmiş tile'lara değil, **havada uçan** tile'lara da bakılarak cevaplanır (projeksiyon).
 
 ```
 Tile tıklandı
    │
    ▼
-Tıklanabilir & session aktif mi? ──hayır──► yoksay
-   │ evet
-   ▼
 session.TryReserveCollect(kind)
    │
-   ├─ rezerve edildi (order ikonu / projeksiyon rack slotu)
-   │      ▼
-   │   Tile'ı ayır (detach), eşzamanlı uçuşu başlat
-   │      ▼
-   │   Tween bitti → CommitReservation → TryCollectTile
-   │      ▼
-   │   Order tamamlandıysa → animasyonlu rack drenajı
-   │      ▼
-   │   PumpBuffer (kapasite açıldıysa bekleyen tıklamaları dene)
+   ├─ rezerve OK → tile uçuş animasyonu → CommitReservation → TryCollectTile
+   │                 │
+   │                 └─ order tamamlandıysa → rack'teki uygun tile'lar order'a aktarılır (animasyonlu)
    │
-   └─ rezerve EDİLEMEDİ (projeksiyon rack dolu)
-          ▼
-       FIFO input buffer'a ekle (tile tahtada kalır)
-          ▼
-       Bir uçuş indiğinde tekrar denenir; hâlâ doluysa ancak o zaman fail
+   └─ rezerve FAIL (projeksiyon rack dolu)
+          → tıklama FIFO buffer'a alınır; tile tahtada kalır
+          → bir uçuş inince veya aktarım slot boşaltınca tekrar denenir
 ```
 
-Öne çıkanlar:
+| Sınıf | Ne yapar? | Katman |
+|-------|-----------|--------|
+| `CollectReservationService` | Uçuş başlamadan hedef slotunu ayırır | Gameplay |
+| `BoardTileCollectCoordinator` | Eşzamanlı uçuşları ve bekleyen tıklamaları yönetir | Presentation |
+| `RackDrainService` | Rack'teki tile'ı uygun order ikonuna taşır | Gameplay |
+| `TileCollectFly` | Tile'ın ekranda uçma animasyonu | Presentation |
 
-- **Gerçek eşzamanlılık:** Birden fazla tile aynı anda uçabilir. Her uçuş kendi hedefini önden rezerve ettiği için rack taşmaz, aynı order ikonu iki kez dolmaz.
-- **Girdi kaybı yok:** Rezerve edilemeyen tıklamalar FIFO input buffer'a alınır ve kapasite açılınca (bir uçuş inince / rack drenajı slot boşaltınca) yeniden denenir.
-- **Projeksiyonlu kapasite:** "Rack dolu mu?" kararı `commit + in-flight` toplamına göre verilir, sadece commit edilmiş sayıya göre değil.
-
-### İlgili sınıflar
-
-| Sınıf | Rol | Katman |
-|-------|-----|--------|
-| `CollectReservation` | Tek bir uçuşun rezervasyonu (hedef, rack delta, order ikonu) | Gameplay |
-| `CollectReservationBook` | Açık rezervasyonlar + toplam projeksiyon rack delta | Gameplay |
-| `CollectReservationService` | Rezervasyon/projeksiyon mantığı: `TryPeekDestination` / `TryReserveCollect` / `TryReserveRackDrain` / `Release` | Gameplay |
-| `LevelObjectiveSession` | İnce facade; transaction API'sini `CollectReservationService`'e delege eder | Gameplay |
-| `BoardTileCollectCoordinator` | Eşzamanlı uçuş yöneticisi: aktif uçuşlar + FIFO input buffer + `PumpBuffer` | Presentation |
-| `RackDrainService` | Rack→order otomatik eşleşme adımları | Gameplay |
-| `TileCollectFly` | DOTween uçuş animasyonu | Presentation |
-
-**Bilinen sınır (kabul edilen):** Projeksiyon, order ilerlemesini (bir order tamamlanınca yeni müşteri gelmesi) simüle etmez. Bu yüzden order'ı tamamlayan bir tile uçarken inen başka bir tıklama, yeni açılan order yerine rack'e gidebilir. Güvenli (asla taşmaz), nadir ve bu kapsam için kabul edilebilir.
+**Kabul edilen sınır:** Rezervasyon sistemi "bir order bitti, yeni müşteri geldi" senaryosunu önceden tahmin etmez. Çok nadir olarak, order'ı bitiren tile hâlâ uçarken gelen başka bir tıklama yeni müşteriye değil rack'e gidebilir. Rack asla taşmaz.
 
 ---
 
-## Rack ve order mantığı (Gameplay)
+## Order ve rack mantığı (Gameplay)
 
-Saf C# çekirdek. UI'dan tamamen bağımsız.
+Bu bölüm **oyunun beyni** — ekran yok, sadece kurallar ve sayaçlar.
 
-| Sınıf | Rol |
-|-------|-----|
-| `LevelObjectiveSession` | İnce facade; alt sistemleri kurar ve dışarıya sadeleştirilmiş bir API sunar (delegasyon) |
-| `ActiveOrderSlots` | Ekrandaki aktif müşteriler + kuyruktaki siparişler; ikon doldurma, slot ilerletme ve order eşleşme taraması |
-| `RackState` | Rack kapasitesi ve tutulan tile'lar (`TryAdd`, `RemoveAt`) |
-| `RackDrainService` | Rack'teki tile'ları uygun order'lara otomatik akıtan adımlar |
-| `CollectReservationService` | Uçuştaki (in-flight) rezervasyonlar + projeksiyonlu hedef hesabı (order ikonu / rack slotu) |
-| `CollectPipeline` + `MatchOrRackCollectHandler` | Tıklanan tile'ın önce order'a mı yoksa rack'e mi gideceğini belirleyen kural zinciri |
+### Kavramlar
 
-Her sınıfın tek bir değişim ekseni var: order sırası `ActiveOrderSlots`, rack depolama `RackState`, otomatik drenaj `RackDrainService`, rezervasyon/projeksiyon `CollectReservationService`, tekil tile kuralı `CollectPipeline`. `LevelObjectiveSession` bunları birbirine bağlayan ince bir facade olarak kalır.
+| Kavram | Anlamı |
+|--------|--------|
+| **Order** | Bir müşterinin istediği tile dizisi (ör. kırmızı, mavi, sarı). Ekranda bir satır ikon olarak görünür. |
+| **Order slot** | Ekranda aynı anda görünen müşteri satırı sayısı (varsayılan 2). Level'da daha fazla müşteri varsa kuyrukta bekler. |
+| **Rack** | Order'a uymayan tile'ların geçici depolandığı yer. Kapasite dolunca yeni tile alınamaz → fail. |
+| **Aktarım** | Bir order tamamlanınca rack'teki tile'lardan uygun olanlar otomatik olarak açık order'lara gider. |
+
+### Akış özeti
+
+```
+Tile toplandı
+   │
+   ├─ Bu kind, bir order satırında boş ikon mu? ──evet──► order ikonu dolar
+   │                                                      │
+   │                                                      └─ tüm ikonlar doldu mu? → müşteri biter, sıradaki gelir
+   │
+   └─ hayır ──► rack'e eklen (doluysa fail)
+```
+
+### Sınıflar ve görevleri
+
+| Sınıf | Görevi (yeni başlayan için) |
+|-------|------------------------------|
+| `LevelObjectiveSession` | Dışarıya tek kapı: "tile topla", "rack slotu ne?", "order satırı ne?" — içeride alt sistemlere dağıtır |
+| `ActiveOrderSlots` | Hangi müşteri hangi satırda, hangi ikonlar doldu, sırada kim var |
+| `RackState` | Rack'te hangi tile'lar var, kaç slot dolu |
+| `RackDrainService` | Order bitince rack'i tarar; eşleşen tile'ı order ikonuna taşır |
+| `CollectPipeline` | Tek bir tile için: önce order'a bak, olmazsa rack'e koy kuralını çalıştırır |
+| `CollectReservationService` | Uçuş sırasında "bu slot benim" rezervasyonu (collect ile birlikte çalışır) |
+
+### Gameplay ile HUD nasıl konuşur?
+
+HUD ekranı çizmek ister; gameplay kuralları çalıştırır. Arada **`IObjectiveHudState`** var: salt okunur bir özet ("2. satırda şu ikonlar dolu, rack'in 3. slotunda mavi tile var"). Presenter'lar session'ın `TryCollectTile` gibi yazma metodlarına erişmez — sadece bu özeti okuyup Image'lara sprite koyar.
+
+`ObjectiveLayoutSpec` ise rack kapasitesi ve kaç order satırı olacağını sayı olarak taşır; prefab veya Unity'den bağımsızdır. `HudLayoutConfig` asset'i hem UI builder'a hem level loader'a aynı sayıları verir.
+
+---
+
+## Order / Rack HUD (Presentation)
+
+Oyuncunun gördüğü sipariş satırları ve rack çubuğu. Kurallar burada **yok**; yalnızca `IObjectiveHudState` okunur ve çizilir.
+
+```
+ObjectiveHud (sahne)
+  ├─ OrderRackHudBuilder     → prefab spawn (Awake'te)
+  └─ OrderRackHud            → ince facade; session bağlar
+         │
+         ▼
+  OrderRackHudController      → gameplay event'lerini dinler, refresh koordine eder
+    ├─ OrderPresenter[]       → her müşteri satırı
+    ├─ RackPresenter          → rack slot görselleri
+    └─ HudDestinationLayout   → uçan tile nereye gidecek? (Rect hedefi)
+         │
+         ▼
+  OrderView / OrderSlotView / RackView / RackSlotView   (prefab'lar)
+```
+
+**Prefab yapısı (kısa):**
+
+```
+Order.prefab          → bir müşteri satırı (içinde runtime'da OrderSlot x N)
+OrderSlot.prefab      → tek ikon + tik işareti
+Rack.prefab           → rack çerçevesi (içinde runtime'da RackSlot x N)
+RackSlot.prefab       → arka plan + tile ikonu
+```
+
+| Referans | Nerede? | Ne işe yarar? |
+|----------|---------|---------------|
+| `orderContainer` / `rackContainer` | Sahnedeki boş RectTransform | Builder prefab'ı *nereye* koyacağını bilir |
+| `container` / `slotContainer` | Order/Rack prefab'ının içinde | Spawn edilen slot'ların *parent'ı* |
+
+### HudLayoutConfig
+
+Tek ayar dosyası: `Assets/GameData/HudLayoutConfig.asset`
+
+| Alan | Etkisi |
+|------|--------|
+| `rackCapacity` | Kaç rack slotu (hem UI hem gameplay) |
+| `activeOrderSlotCount` | Kaç order satırı (hem UI hem gameplay) |
+| Prefab referansları | Hangi şablonlar spawn edilecek |
+
+Slot görünümünü değiştirmek için prefab'ı düzenle; sayıları değiştirmek için config asset'ini düzenle.
 
 ---
 
 ## Tile davranış sistemi (genişletilebilir tile'lar)
 
-Tile artık sadece bir renk (`TileKind`) enum'u değil. Her hücre bir **model** (`BoardCell`: kind + `BehaviorId` + modifier'lar) taşır ve bir **davranış** (`ITileBehavior`) ile eşleşir. Amaç: yeni bir tile tipi (kilitli, buzlu, bomba…) eklerken merkezi dosyalara değiştirmek zorunda kalmamak.
+Şu an oyunda fiilen tek tip tile var: **standard** (her şeye izin verir). Altyapı ise farklı tile tipleri (kilitli, buzlu vb.) eklemeye hazır.
 
-### Tek arayüz, tek kayıt noktası
+Her hücre `BoardCell`: renk (`TileKind`) + `BehaviorId`. Kurallar `ITileBehavior` sınıflarında; hangi id hangi davranışa gider `TileBehaviorCatalog` söyler (`GameCompositionRoot`'ta kurulur). Görsel (overlay, renk) ayrı asset'te: `TileBehaviorRegistry`.
 
-```
-ITileBehavior                         (davranışın kuralları)
-  ├─ string Id                        → BoardCell.BehaviorId ile eşleşir
-  ├─ IsClickable(...)                 → tıklanabilirlik kapısı
-  └─ CanRemoveFromBoard(cell)         → toplandığında tahtadan kalkar mı
-     + (opsiyonel) ITileCollectContributor → collect mantığını özelleştir
-
-TileBehaviorCatalog                   (enjekte edilen kayıt defteri, static değil)
-  └─ Resolve(behaviorId) → ITileBehavior (bilinmiyorsa StandardTileBehavior)
-```
-
-- **`StandardTileBehavior`**: her şeye izin veren varsayılan — **şu an shipping olan tek tile tipi**. Yeni davranışlar bundan türeyip sadece önemsedikleri seam'i override eder.
-
-Bilinçli olarak henüz somut bir özel tile (kilit/buz/bomba vb.) eklenmedi; sistem bunları eklemeye **hazır** ama gereksiz mekanik shipping edilmiyor.
-
-### Kural pipeline'ları katalogdan çözer
-
-`ClickabilityPipeline`, `GameplayRulesContext.CanRemoveFromBoard` ve collect zinciri, davranışı **`TileBehaviorCatalog`'tan** çözer. Katalog `GameCompositionRoot`'ta açıkça kurulur (gizli static lookup yok, test edilebilir):
-
-```
-GameCompositionRoot.BuildBehaviorCatalog()
-  new TileBehaviorCatalog(new ITileBehavior[] { })   // yeni davranışlar buraya
-```
-
-**Yeni tile eklemek = 1 sınıf + bu listeye 1 satır.** Collect'i değiştiren bir tile ayrıca `ITileCollectContributor` implement eder; katalog onu otomatik olarak collect zincirine ekler (`GameplayRulesContext` davranışları tarayıp collect yeteneği olanları toplar). Bilinmeyen bir `behaviorId` sessizce `standard`'a düşer.
-
-### Level JSON'da davranış (opsiyonel, geriye dönük uyumlu)
-
-`matrix3D` ile aynı şekle sahip opsiyonel bir `behaviors` matrisi. Alan yoksa (bugünkü tüm level'lar) her tile `standard`. Örnek (`"ice"` yalnızca formatı göstermek için — böyle bir davranış kayıtlı değilse `standard` gibi davranır):
+JSON'da opsiyonel `behaviors` matrisi (`matrix3D` ile aynı boyut). Yoksa her tile `standard` sayılır:
 
 ```json
 {
@@ -184,238 +210,70 @@ GameCompositionRoot.BuildBehaviorCatalog()
 }
 ```
 
-Veri akışı: `behaviors` → `LevelGridParser` → `LevelBoardSpec` (kind + behaviorId taşır) → `PlayableBoardState` (`BoardCell`) → `LevelBoardGrid` → `BoardTileView`. Behavior artık zincirin hiçbir yerinde düşmüyor.
+Yeni davranış eklemek:
 
-### Görsel
+| Adım | Ne yap |
+|------|--------|
+| Kural | `ITileBehavior` implement et (tıklanabilirlik, tahtadan kalkma vb.) |
+| Collect özelleştir | Ayrıca `ITileCollectContributor` ekle |
+| Kayıt | `GameCompositionRoot.BuildBehaviorCatalog()` dizisine ekle |
+| Level | JSON `behaviors` matrisine id yaz |
+| Görsel | `TileBehaviorRegistry` asset'ine overlay/tint ekle |
 
-`BoardTileView.ApplyBehaviorVisual(overlaySprite, tint)` ile davranışa özel overlay + renk uygulanır. Görsel metadata `TileBehaviorRegistry` (ScriptableObject: id → overlay sprite + tint) içinde; `LevelBoardGrid` çözer. Mantık (`TileBehaviorCatalog`, kod) ile görsel (`TileBehaviorRegistry`, asset) ayrıdır.
-
-### Yeni davranış nasıl eklenir? (örnek reçete)
-
-| İstediğin | Ne yap |
-|-----------|--------|
-| Tıklanabilirliği değiştir (kilit, buz…) | `class FooTileBehavior : StandardTileBehavior` → `IsClickable`/`CanRemoveFromBoard` override |
-| Collect'i değiştir | Ayrıca `ITileCollectContributor` implement et, `TryHandleCollect`'te kendi `cell.BehaviorId`'ini kontrol et |
-| Kaydet | `GameCompositionRoot.BuildBehaviorCatalog()` dizisine `new FooTileBehavior()` ekle |
-| Level'da kullan | JSON `behaviors` matrisine `"foo"` yaz |
-| Görsel ver | `TileBehaviorRegistry` asset'ine id + overlay/tint ekle |
-
-> **Not (oyun dengesi):** Board tile sayısı = order ikon toplamı olmalı (parser doğrular). Tahtadan tile *kaldıran* ya da toplanmasını engelleyen davranışlar bu değişmezliği bozabilir; böyle mekanikler için kazanma koşulunun da güncellenmesi gerekir. Bunlar yeni tile eklerken tasarım kararıdır, çatı bunları destekler.
+> Level'da tahta tile sayısı = order ikon toplamı olmalıdır (parser kontrol eder). Tahtadan tile kaldıran davranışlar bu dengeyi bozabilir.
 
 ---
 
-## Order / Rack HUD sistemi
+## Level Editor
 
-HUD prefab'lardan runtime'da kurulur. Slot sayıları `HudLayoutConfig` ile ayarlanır; her sorumluluk ayrı sınıftadır.
+Unity menüsü: **Window → Tile Level Editor**. Runtime oyun kodunu değiştirmez; JSON level üretir.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  SAHNE (Main.unity)                                         │
-│  ObjectiveHud GameObject                                    │
-│    ├─ OrderRackHudBuilder   → prefab'lardan UI kurar         │
-│    └─ OrderRackHud          → ince facade (session bağlar)  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  OrderRackHudBinder         → event dinler, koordine eder   │
-│    ├─ OrderPresenter[]      → her order satırının mantığı   │
-│    ├─ RackPresenter         → rack slot görselleri          │
-│    └─ HudDestinationLayout  → tile uçuş hedefi (Rect)       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  VIEW (prefab'lar)                                          │
-│    OrderView      → bir müşteri siparişi satırı             │
-│    OrderSlotView  → satırdaki tek ikon + tik                │
-│    RackView       → rack çerçevesi + slot container         │
-│    RackSlotView   → rack'teki tek slot (arka plan + ikon)   │
-└─────────────────────────────────────────────────────────────┘
-```
+**İki faz:**
 
-### Prefab hiyerarşisi
+1. **Order Authoring** — Palette'den tile ekleyerek müşteri sipariş sütunlarını oluştur → **Finalize orders** ile kilitle.
+2. **Placing Tiles** — Sıradaki tile'ları tahtaya yerleştir (rack araç olarak kullanılabilir) → **Validate** → **Export**.
 
-Dört atom prefab + iki container prefab:
+Önemli kurallar:
+
+- **Finalize** olmadan export edilmez; export finalize anındaki sipariş snapshot'ını yazar.
+- Export öncesi el (hand) ve rack boş olmalı.
+- **Edit orders** ile finalize sonrası sipariş düzenlenebilir; bu modda Place/Remove kapalıdır.
+
+Her tahta tile'ı hangi siparişten geldiğini hatırlar (**provenance**). Remove ile kaldırılan tile doğru order sütununa döner.
 
 ```
-Order.prefab                    Rack.prefab
-└─ Container (Horizontal)       └─ SlotContainer (Horizontal)
-   └─ (runtime: OrderSlot x N)     └─ (runtime: RackSlot x N)
-
-OrderSlot.prefab                RackSlot.prefab
-├─ OrderIcon (Image)            ├─ Background (Image, her zaman görünür)
-└─ Tick (Image, başta kapalı)   └─ Icon (Image, tile varken açık)
+TileLevelEditorWindow
+  ├─ LevelEditorOrderModel   → sipariş sütunları, finalize snapshot
+  ├─ LevelEditorBoardModel   → 3D grid, rack, provenance
+  └─ EditorTileIcons         → palette çizimi
 ```
-
-**Önemli ayrım:**
-
-| Referans | Nerede | Ne işe yarar |
-|----------|--------|--------------|
-| `orderContainer` / `rackContainer` | `OrderRackHudBuilder` (sahne) | Builder'ın prefab spawn edeceği **boş RectTransform** alanları |
-| `container` / `slotContainer` | `Order.prefab` / `Rack.prefab` içinde | Spawn edilen slot'ların parent'ı |
-
-Sahne container'ı "nereye koyayım", prefab container'ı "slot'ları nereye dizeyim".
-
-### Sınıf sorumlulukları (HUD)
-
-| Sınıf | Rol |
-|-------|-----|
-| `OrderRackHud` | İnce MonoBehaviour facade; session bağlar, animasyon ayarları |
-| `OrderRackHudBuilder` | Prefab'lardan HUD kurar |
-| `OrderRackHudBinder` | Event subscribe, refresh koordinasyonu |
-| `OrderPresenter` | Bir order satırının sprite + animasyon mantığı |
-| `RackPresenter` | Rack slot görsellerini günceller |
-| `OrderView` / `OrderSlotView` | Order UI görünümü |
-| `RackView` / `RackSlotView` | Rack UI görünümü |
-| `HudDestinationLayout` | Tile uçuş hedefi Rect çözümü |
-| `OrderRackLayoutDiagnostics` | Editor/runtime diagnostic log |
-
-`OrderRackHud` binder'a delege eder ve `DestinationLayout` property'si ile dışarıya canlı layout verir.
 
 ---
 
-## HudLayoutConfig — tek ayar noktası
+## Sık değişiklikler — nereye dokunmalı?
 
-Dosya: `Assets/GameData/HudLayoutConfig.asset`
-
-| Alan | Varsayılan | Etkisi |
-|------|------------|--------|
-| `rackCapacity` | 6 | Rack'te kaç slot spawn edilir + gameplay rack kapasitesi |
-| `activeOrderSlotCount` | 2 | Ekranda kaç order satırı + gameplay aktif slot sayısı |
-| `orderPrefab` | Order.prefab | Müşteri satırı şablonu |
-| `orderSlotPrefab` | OrderSlot.prefab | Satırdaki ikon+tick şablonu |
-| `rackPrefab` | Rack.prefab | Rack çerçevesi şablonu |
-| `rackSlotPrefab` | RackSlot.prefab | Rack slot şablonu |
-
-**Kim okur?**
-
-- `OrderRackHudBuilder` → görsel kurulum (kaç prefab spawn edilecek)
-- `LevelBoardLoader` → gameplay (`LevelObjectiveSession` constructor'a kapasite geçer)
-
-Böylece UI ve oyun mantığı aynı sayıları kullanır; biri 6 diğeri 9 olmaz.
-
-**Slot tipini değiştirmek:** Prefab'ın kendisini düzenle (`OrderSlot.prefab` veya `RackSlot.prefab`). Config'te referans aynı kalır, tüm instance'lar güncellenir.
+| İstediğin | Dosya / yer |
+|-----------|-------------|
+| Rack 9 slot, 3 order satırı | `HudLayoutConfig` asset |
+| Slot görünümü (ikon, tik, çerçeve) | `OrderSlot.prefab` / `RackSlot.prefab` |
+| Order tamamlanınca animasyon | `OrderRackHud` Inspector (`orderCompleteScale*`) |
+| Tile uçuş hızı / easing | `TileCollectFly` |
+| Eşzamanlı tıklama / buffer | `BoardTileCollectCoordinator` |
+| Rezervasyon / projeksiyon | `CollectReservationService` |
+| Order mı rack mi kuralı | `CollectPipeline`, `MatchOrRackCollectHandler` |
+| Yeni level | Level Editor → Export |
+| Yeni tile davranışı | `ITileBehavior` + katalog + registry |
 
 ---
 
-## Level Editor (Unity Editor aracı)
+## Terimler sözlüğü
 
-Level'ları JSON olarak oluşturmak ve düzenlemek için IMGUI tabanlı bir editör penceresi vardır. Oyun mantığından bağımsızdır; `TileJam.LevelEditor` assembly'si `Core`, `LevelData` ve `Presentation` katmanlarını kullanır.
-
-**Açmak:** Unity menüsünden **Window → Tile Level Editor**.
-
-### Temel akış
-
-Editör iki ana fazda çalışır:
-
-```
-1. Order Authoring (sipariş yazımı)
-   Palette → order sütunlarına tile ekle → Finalize orders
-                    │
-                    ▼
-2. Placing Tiles (tahta yerleştirme)
-   Place / Remove → board + rack → Validate → Export
-```
-
-| Faz | Ne yaparsın |
-|-----|-------------|
-| **Order Authoring** | Palette'den tile ekleyerek müşteri sipariş sütunlarını oluşturursun. **Add order** ile yeni sütun açarsın. **Finalize orders** ile siparişleri kilitlersin. |
-| **Placing Tiles** | Finalize sonrası tile'lar sırayla eline (hand) gelir; yeşil hücrelere tıklayarak tahtaya yerleştirirsin. Rack, oyundaki gibi geçici depo olarak kullanılır. |
-
-Mevcut bir level yüklendiğinde tahtadaki tile'lar zaten yerleşmiş olabilir. Bu durumda order sütunları boş görünür; tile'lar tahtada kalır.
-
-### Araçlar ve butonlar
-
-| Kontrol | Açıklama |
-|---------|----------|
-| **Width / Height / Depth** | Tahta boyutu (major cell). **Apply size** ile grid yenilenir. |
-| **x1 / x3** | Palette'den tek seferde kaç tile ekleneceği. |
-| **Load level** | `Assets/Resources/Levels` altındaki JSON'ları yükler. |
-| **Import… / Export…** | Diskten JSON alır / kaydeder. |
-| **New** | Boş level başlatır. |
-| **Add order** | Yeni müşteri sipariş sütunu ekler (finalize öncesi). |
-| **Clear active column** | Aktif sütundaki tile'ları temizler. |
-| **Finalize orders** | Siparişleri snapshot'a kilitler; yerleştirme moduna geçer. |
-| **Edit orders** | Mevcut level'a yeni sipariş eklemek veya siparişleri değiştirmek için kilidi açar. |
-| **Place** | Tile'ı tahtaya veya rack'e koyar. |
-| **Remove** | Üstteki tile'ı kaldırır; eşleşen tile order'a, diğerleri rack'e döner. |
-| **Remove all** | Tüm tahta + rack tile'larını ilgili order sütunlarına geri toplar. |
-| **Validate** | `LevelGridParser` kurallarına göre level'ı kontrol eder. |
-
-### Edit orders modu
-
-Finalize edilmiş bir level'da sipariş değiştirmek için **Edit orders** kullanılır:
-
-1. **Edit orders** → palette ve order sütunları tekrar açılır.
-2. **Add order** ile yeni sütun ekle, palette'den tile doldur.
-3. İstersen yeni tile'ları hemen tahtaya yerleştir.
-4. **Finalize orders** ile yeni siparişleri snapshot'a ekle.
-
-Edit orders sırasında **Place**, **Remove** ve **Remove all** devre dışıdır; önce finalize etmen gerekir.
-
-### Tahta yerleştirme kuralları
-
-- Her tile **2×2 fine cell** kaplar ve grid kesişimine hizalanır.
-- Tile'lar katmanlıdır (`depth`); üst katman alttakini örter.
-- **Place** modunda: elindeki tile'ı yeşil (boş) alana tıklayarak koyarsın.
-- **Remove** modunda: tile'ın herhangi bir yerine tıklamak yeterlidir (2×2 footprint'in tamamı tıklanabilir).
-- Rack doluysa veya elinde tile varken yeni tile alamazsın.
-
-### Tile provenance (köken takibi)
-
-Her tahtadaki tile, hangi order sütunundan ve hangi ikon slotundan geldiğini hatırlar (`orderCol` + `orderIcon`). Bu sayede:
-
-- **Remove** ile kaldırılan tile doğru order slot'una geri döner.
-- **Remove all** snapshot + henüz finalize edilmemiş yeni order'ları birleştirerek order sütunlarını yeniden doldurur.
-- Yeni order eklerken tahta provenance'ı bozulmaz.
-
-### Export kuralları
-
-Export, tahtadaki tile multiset'ini **finalize edilmiş order snapshot** ile karşılaştırır. Şunlar sağlanmalıdır:
-
-| Koşul | Neden |
-|-------|-------|
-| Elde tile olmamalı | Hand boşaltılmalı. |
-| Rack boş olmalı | Tüm tile'lar tahtada olmalı. |
-| Yeni order'lar finalize edilmiş olmalı | Export snapshot kullanır; edit modundaki bekleyen siparişler dahil edilmez. |
-| Board tile sayısı = order tile sayısı | Oyun kuralı: her order ikonu tahtada bir tile'a karşılık gelir. |
-
-Yeni order tile'larını tahtaya yerleştirip finalize etmeden export edersen editör uyarı verir. **Edit orders → Finalize orders → Export** sırasını izle.
-
-### Mimari (editör sınıfları)
-
-```
-TileLevelEditorWindow          → IMGUI pencere, faz/mode yönetimi, import/export
-    ├─ LevelEditorOrderModel   → order sütunları, finalize snapshot, reverse-build kuyruğu
-    ├─ LevelEditorBoardModel   → tahta grid, rack, provenance, DTO üretimi
-    └─ EditorTileIcons         → palette/tile çizimi (sprite veya renk)
-```
-
-| Sınıf | Rol |
-|-------|-----|
-| `TileLevelEditorWindow` | Tüm UI akışı: toolbar, palette, orders, board, validate/export |
-| `LevelEditorOrderModel` | Order sütunları, finalize snapshot (`_snapshotAtFinalize`), reverse-build |
-| `LevelEditorBoardModel` | 3D grid, rack, tile provenance, board ↔ JSON DTO |
-| `EditorTileIcons` | Editörde tile görselleri |
-
-**Snapshot vs live:** Finalize sonrası sipariş tanımı `_snapshotAtFinalize` içinde saklanır. Export bu snapshot'ı yazar. Live order sütunları yerleştirme sırasında tüketilir; tahtadaki tile'lar provenance ile snapshot'a bağlı kalır.
-
----
-
-## İleride neyi kolayca değiştirebilirsin?
-
-| İstediğin değişiklik | Ne yap |
-|----------------------|--------|
-| Rack 9 slot olsun | `HudLayoutConfig` → `rackCapacity = 9` |
-| 3 aktif order satırı | `HudLayoutConfig` → `activeOrderSlotCount = 3` |
-| Order slot görünümü | `OrderSlot.prefab` düzenle |
-| Rack slot görünümü | `RackSlot.prefab` düzenle |
-| Order tamamlanma animasyonu | `OrderRackHud` Inspector → `orderCompleteScale*` alanları |
-| Tile uçuş hedefi | `HudDestinationLayout` (genelde dokunmana gerek yok) |
-| Eşzamanlı collect davranışı | `BoardTileCollectCoordinator` (rezervasyon + input buffer) |
-| Rezervasyon / projeksiyon mantığı | `CollectReservationService` |
-| Tile'ın order/rack kuralı | `CollectPipeline` + `MatchOrRackCollectHandler` |
-| Yeni level oluştur / düzenle | **Window → Tile Level Editor** |
-| Level JSON export/import | `TileLevelEditorWindow` → Export… / Import… |
-| Order finalize / edit akışı | `LevelEditorOrderModel` + **Finalize orders** / **Edit orders** butonları |
+| Terim | Kısa açıklama |
+|-------|----------------|
+| Collect | Tile'ı tahtadan alıp order veya rack'e gönderme |
+| Session | Bir level oturumu; order, rack ve collect state'i `LevelObjectiveSession`'da |
+| Presenter | Gameplay state → UI komutları çevirici (`OrderPresenter`, `RackPresenter`) |
+| View | Ham UI objesi (prefab / MonoBehaviour) |
+| Projeksiyon | Commit edilmiş state + havada uçan rezervasyonların toplamı |
+| Aktarım | Rack'teki tile'ın uygun order ikonuna otomatik gitmesi |
+| Facade | Dışarıya sade API sunan ince sınıf (`LevelObjectiveSession`, `OrderRackHud`) |

@@ -8,6 +8,5 @@ namespace Presentation.Hud
     {
         bool TryGetOrderIconRectTransform(int activeOrderSlot, int iconIdx, out RectTransform rect);
         bool TryGetRackSlotImage(int index, out Image img);
-        bool TryGetRackSlotImages(out Image[] images);
     }
 }

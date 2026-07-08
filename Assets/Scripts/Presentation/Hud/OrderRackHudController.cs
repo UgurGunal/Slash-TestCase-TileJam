@@ -5,9 +5,9 @@ using Gameplay;
 namespace Presentation.Hud
 {
     /// <summary>Subscribes to gameplay events, owns the order/rack presenters, and drives refreshes.</summary>
-    public sealed class OrderRackHudBinder
+    public sealed class OrderRackHudController
     {
-        readonly TileIconLibrary _iconLibrary;
+        readonly TileKindSpriteResolver _sprites;
         readonly bool _orderCompleteScaleAnimation;
         readonly float _orderCompleteScaleDownSec;
         readonly Ease _orderCompleteScaleDownEase;
@@ -17,23 +17,22 @@ namespace Presentation.Hud
         OrderPresenter[] _orders;
         RackPresenter _rack;
         HudDestinationLayout _destinationLayout;
-        LevelObjectiveSession _session;
+        IObjectiveHudState _hudState;
         IGameplayEventBus _eventBus;
-        bool _loggedOrderVisibilityHints;
 
         // Views spawned by OrderRackHudBuilder; order slots are spawned at bind time from the level's max order size.
         OrderView[] _orderViews;
         OrderSlotView _orderSlotPrefab;
 
-        public OrderRackHudBinder(
-            TileIconLibrary iconLibrary,
+        public OrderRackHudController(
+            TileKindSpriteResolver sprites,
             bool orderCompleteScaleAnimation,
             float orderCompleteScaleDownSec,
             Ease orderCompleteScaleDownEase,
             float orderCompleteScaleUpSec,
             Ease orderCompleteScaleUpEase)
         {
-            _iconLibrary = iconLibrary;
+            _sprites = sprites;
             _orderCompleteScaleAnimation = orderCompleteScaleAnimation;
             _orderCompleteScaleDownSec = orderCompleteScaleDownSec;
             _orderCompleteScaleDownEase = orderCompleteScaleDownEase;
@@ -48,13 +47,13 @@ namespace Presentation.Hud
         {
             _orderViews = orderViews;
             _orderSlotPrefab = orderSlotPrefab;
-            _rack = new RackPresenter(rack != null ? rack.RackSlotImages : null, _iconLibrary);
+            _rack = new RackPresenter(rack != null ? rack.RackSlotImages : null, _sprites);
 
             // Execution-order independent: if the session was already bound before the builder
             // configured the views, build the orders now; otherwise BindSession will do it.
-            if (_session != null && _orderViews != null && _orderSlotPrefab != null)
+            if (_hudState != null && _orderViews != null && _orderSlotPrefab != null)
             {
-                BuildOrdersFromViews(_session.MaxOrderIconsOnLevel);
+                BuildOrdersFromViews(_hudState.MaxOrderIconsOnLevel);
                 Refresh();
             }
             else
@@ -67,9 +66,8 @@ namespace Presentation.Hud
         public void BindSession(LevelObjectiveSession session, IGameplayEventBus eventBus)
         {
             Unbind();
-            _session = session;
+            _hudState = session;
             _eventBus = eventBus;
-            _loggedOrderVisibilityHints = false;
 
             if (_orderViews != null && _orderSlotPrefab != null)
                 BuildOrdersFromViews(session != null ? session.MaxOrderIconsOnLevel : 0);
@@ -99,26 +97,20 @@ namespace Presentation.Hud
 
             KillAllOrderTweens();
             _eventBus = null;
-            _session = null;
+            _hudState = null;
             RebuildDestinationLayout();
         }
 
         public void Refresh()
         {
-            if (_session == null) return;
+            if (_hudState == null) return;
 
-            var stride = _session.MaxOrderIconsOnLevel;
+            var stride = _hudState.MaxOrderIconsOnLevel;
             var orderCount = _orders?.Length ?? 0;
             for (var s = 0; s < orderCount; s++)
-                _orders[s].Refresh(_session, stride);
+                _orders[s].Refresh(_hudState, stride);
 
-            _rack?.Refresh(_session);
-
-            OrderRackLayoutDiagnostics.DiagnoseOrderVisibilityOnce(
-                null,
-                _session,
-                _orders,
-                ref _loggedOrderVisibilityHints);
+            _rack?.Refresh(_hudState);
         }
 
         void BuildOrdersFromViews(int slotCount)
@@ -144,13 +136,13 @@ namespace Presentation.Hud
 
         void OnActiveOrderSlotAdvanced(int slot)
         {
-            if (!_orderCompleteScaleAnimation || _session == null || _orders == null) return;
+            if (!_orderCompleteScaleAnimation || _hudState == null || _orders == null) return;
             if ((uint)slot >= (uint)_orders.Length) return;
-            _orders[slot].PlayAdvanceAnimation(_session, _session.MaxOrderIconsOnLevel);
+            _orders[slot].PlayAdvanceAnimation(_hudState, _hudState.MaxOrderIconsOnLevel);
         }
 
         void RebuildDestinationLayout() =>
-            _destinationLayout = new HudDestinationLayout(_session, _orders, _rack);
+            _destinationLayout = new HudDestinationLayout(_hudState, _orders, _rack);
 
         void CacheOrderBaseScales()
         {
@@ -170,7 +162,7 @@ namespace Presentation.Hud
             new OrderPresenter(
                 index,
                 view,
-                _iconLibrary,
+                _sprites,
                 _orderCompleteScaleAnimation,
                 _orderCompleteScaleDownSec,
                 _orderCompleteScaleDownEase,
