@@ -141,7 +141,7 @@ Her sınıfın tek bir değişim ekseni var: order sırası `ActiveOrderSlots`, 
 
 ## Tile davranış sistemi (genişletilebilir tile'lar)
 
-Tile artık sadece bir renk (`TileKind`) enum'u değil. Her hücre bir **model** (`BoardCell`: kind + `BehaviorId` + modifier'lar) taşır ve bir **davranış** (`ITileBehavior`) ile eşleşir. Amaç: yeni bir tile tipi (kilitli, buzlu, bomba…) eklerken merkezi dosyalara `if/switch` serpiştirmek zorunda kalmamak.
+Tile artık sadece bir renk (`TileKind`) enum'u değil. Her hücre bir **model** (`BoardCell`: kind + `BehaviorId` + modifier'lar) taşır ve bir **davranış** (`ITileBehavior`) ile eşleşir. Amaç: yeni bir tile tipi (kilitli, buzlu, bomba…) eklerken merkezi dosyalara değiştirmek zorunda kalmamak.
 
 ### Tek arayüz, tek kayıt noktası
 
@@ -299,6 +299,110 @@ Böylece UI ve oyun mantığı aynı sayıları kullanır; biri 6 diğeri 9 olma
 
 ---
 
+## Level Editor (Unity Editor aracı)
+
+Level'ları JSON olarak oluşturmak ve düzenlemek için IMGUI tabanlı bir editör penceresi vardır. Oyun mantığından bağımsızdır; `TileJam.LevelEditor` assembly'si `Core`, `LevelData` ve `Presentation` katmanlarını kullanır.
+
+**Açmak:** Unity menüsünden **Window → Tile Level Editor**.
+
+### Temel akış
+
+Editör iki ana fazda çalışır:
+
+```
+1. Order Authoring (sipariş yazımı)
+   Palette → order sütunlarına tile ekle → Finalize orders
+                    │
+                    ▼
+2. Placing Tiles (tahta yerleştirme)
+   Place / Remove → board + rack → Validate → Export
+```
+
+| Faz | Ne yaparsın |
+|-----|-------------|
+| **Order Authoring** | Palette'den tile ekleyerek müşteri sipariş sütunlarını oluşturursun. **Add order** ile yeni sütun açarsın. **Finalize orders** ile siparişleri kilitlersin. |
+| **Placing Tiles** | Finalize sonrası tile'lar sırayla eline (hand) gelir; yeşil hücrelere tıklayarak tahtaya yerleştirirsin. Rack, oyundaki gibi geçici depo olarak kullanılır. |
+
+Mevcut bir level yüklendiğinde tahtadaki tile'lar zaten yerleşmiş olabilir. Bu durumda order sütunları boş görünür; tile'lar tahtada kalır.
+
+### Araçlar ve butonlar
+
+| Kontrol | Açıklama |
+|---------|----------|
+| **Width / Height / Depth** | Tahta boyutu (major cell). **Apply size** ile grid yenilenir. |
+| **x1 / x3** | Palette'den tek seferde kaç tile ekleneceği. |
+| **Load level** | `Assets/Resources/Levels` altındaki JSON'ları yükler. |
+| **Import… / Export…** | Diskten JSON alır / kaydeder. |
+| **New** | Boş level başlatır. |
+| **Add order** | Yeni müşteri sipariş sütunu ekler (finalize öncesi). |
+| **Clear active column** | Aktif sütundaki tile'ları temizler. |
+| **Finalize orders** | Siparişleri snapshot'a kilitler; yerleştirme moduna geçer. |
+| **Edit orders** | Mevcut level'a yeni sipariş eklemek veya siparişleri değiştirmek için kilidi açar. |
+| **Place** | Tile'ı tahtaya veya rack'e koyar. |
+| **Remove** | Üstteki tile'ı kaldırır; eşleşen tile order'a, diğerleri rack'e döner. |
+| **Remove all** | Tüm tahta + rack tile'larını ilgili order sütunlarına geri toplar. |
+| **Validate** | `LevelGridParser` kurallarına göre level'ı kontrol eder. |
+
+### Edit orders modu
+
+Finalize edilmiş bir level'da sipariş değiştirmek için **Edit orders** kullanılır:
+
+1. **Edit orders** → palette ve order sütunları tekrar açılır.
+2. **Add order** ile yeni sütun ekle, palette'den tile doldur.
+3. İstersen yeni tile'ları hemen tahtaya yerleştir.
+4. **Finalize orders** ile yeni siparişleri snapshot'a ekle.
+
+Edit orders sırasında **Place**, **Remove** ve **Remove all** devre dışıdır; önce finalize etmen gerekir.
+
+### Tahta yerleştirme kuralları
+
+- Her tile **2×2 fine cell** kaplar ve grid kesişimine hizalanır.
+- Tile'lar katmanlıdır (`depth`); üst katman alttakini örter.
+- **Place** modunda: elindeki tile'ı yeşil (boş) alana tıklayarak koyarsın.
+- **Remove** modunda: tile'ın herhangi bir yerine tıklamak yeterlidir (2×2 footprint'in tamamı tıklanabilir).
+- Rack doluysa veya elinde tile varken yeni tile alamazsın.
+
+### Tile provenance (köken takibi)
+
+Her tahtadaki tile, hangi order sütunundan ve hangi ikon slotundan geldiğini hatırlar (`orderCol` + `orderIcon`). Bu sayede:
+
+- **Remove** ile kaldırılan tile doğru order slot'una geri döner.
+- **Remove all** snapshot + henüz finalize edilmemiş yeni order'ları birleştirerek order sütunlarını yeniden doldurur.
+- Yeni order eklerken tahta provenance'ı bozulmaz.
+
+### Export kuralları
+
+Export, tahtadaki tile multiset'ini **finalize edilmiş order snapshot** ile karşılaştırır. Şunlar sağlanmalıdır:
+
+| Koşul | Neden |
+|-------|-------|
+| Elde tile olmamalı | Hand boşaltılmalı. |
+| Rack boş olmalı | Tüm tile'lar tahtada olmalı. |
+| Yeni order'lar finalize edilmiş olmalı | Export snapshot kullanır; edit modundaki bekleyen siparişler dahil edilmez. |
+| Board tile sayısı = order tile sayısı | Oyun kuralı: her order ikonu tahtada bir tile'a karşılık gelir. |
+
+Yeni order tile'larını tahtaya yerleştirip finalize etmeden export edersen editör uyarı verir. **Edit orders → Finalize orders → Export** sırasını izle.
+
+### Mimari (editör sınıfları)
+
+```
+TileLevelEditorWindow          → IMGUI pencere, faz/mode yönetimi, import/export
+    ├─ LevelEditorOrderModel   → order sütunları, finalize snapshot, reverse-build kuyruğu
+    ├─ LevelEditorBoardModel   → tahta grid, rack, provenance, DTO üretimi
+    └─ EditorTileIcons         → palette/tile çizimi (sprite veya renk)
+```
+
+| Sınıf | Rol |
+|-------|-----|
+| `TileLevelEditorWindow` | Tüm UI akışı: toolbar, palette, orders, board, validate/export |
+| `LevelEditorOrderModel` | Order sütunları, finalize snapshot (`_snapshotAtFinalize`), reverse-build |
+| `LevelEditorBoardModel` | 3D grid, rack, tile provenance, board ↔ JSON DTO |
+| `EditorTileIcons` | Editörde tile görselleri |
+
+**Snapshot vs live:** Finalize sonrası sipariş tanımı `_snapshotAtFinalize` içinde saklanır. Export bu snapshot'ı yazar. Live order sütunları yerleştirme sırasında tüketilir; tahtadaki tile'lar provenance ile snapshot'a bağlı kalır.
+
+---
+
 ## İleride neyi kolayca değiştirebilirsin?
 
 | İstediğin değişiklik | Ne yap |
@@ -312,3 +416,6 @@ Böylece UI ve oyun mantığı aynı sayıları kullanır; biri 6 diğeri 9 olma
 | Eşzamanlı collect davranışı | `BoardTileCollectCoordinator` (rezervasyon + input buffer) |
 | Rezervasyon / projeksiyon mantığı | `CollectReservationService` |
 | Tile'ın order/rack kuralı | `CollectPipeline` + `MatchOrRackCollectHandler` |
+| Yeni level oluştur / düzenle | **Window → Tile Level Editor** |
+| Level JSON export/import | `TileLevelEditorWindow` → Export… / Import… |
+| Order finalize / edit akışı | `LevelEditorOrderModel` + **Finalize orders** / **Edit orders** butonları |

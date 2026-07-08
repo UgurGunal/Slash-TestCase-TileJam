@@ -99,7 +99,7 @@ namespace LevelEditor
             EditorGUI.DrawRect(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), color);
         }
 
-        public static bool TileButton(Rect rect, TileKind kind, bool selected = false)
+        public static bool TileButton(Rect rect, TileKind kind, bool selected = false, Color? tint = null)
         {
             var prev = GUI.backgroundColor;
             if (selected)
@@ -107,7 +107,7 @@ namespace LevelEditor
 
             var clicked = GUI.Button(rect, GUIContent.none);
             var inner = new Rect(rect.x + 2f, rect.y + 2f, rect.width - 4f, rect.height - 4f);
-            DrawTile(inner, kind);
+            DrawTile(inner, kind, tint);
             GUI.backgroundColor = prev;
             return clicked;
         }

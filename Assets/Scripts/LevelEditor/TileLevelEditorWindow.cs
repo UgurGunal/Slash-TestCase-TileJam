@@ -63,6 +63,8 @@ namespace LevelEditor
         bool _hoverValid;
         readonly List<(int layer, int px, int py, TileKind kind)> _drawOrderScratch =
             new List<(int layer, int px, int py, TileKind kind)>();
+        readonly List<(TileKind kind, int orderCol, int orderIcon)> _pendingOrderTilesScratch =
+            new List<(TileKind kind, int orderCol, int orderIcon)>();
         int _maxVisibleLayer;
         GUIStyle _layerBadgeStyle;
 
@@ -82,6 +84,19 @@ namespace LevelEditor
 
                 return _layerBadgeStyle;
             }
+        }
+
+        bool CanUseBoardTools() => _orders.IsFinalized || _orders.HasOrderSnapshot;
+
+        bool IsEditOrdersMode => !_orders.IsFinalized && CanUseBoardTools();
+
+        bool CanInteractWithBoard() => CanUseBoardTools() && !IsEditOrdersMode;
+
+        void MaintainOrderColumnIndices()
+        {
+            var remap = _orders.CompactMutableOrderColumns();
+            if (remap.Count > 0)
+                _board.RemapOrderColumnIndices(remap, _orders.SnapshotOrderCount);
         }
 
         string[] _resourceLevelPaths = System.Array.Empty<string>();
@@ -184,7 +199,13 @@ namespace LevelEditor
             EditorGUILayout.LabelField("Palette", EditorStyles.boldLabel);
             if (_orders.IsFinalized)
             {
-                EditorGUILayout.HelpBox("Unlock orders to edit the palette and order columns.", MessageType.None);
+                EditorGUILayout.HelpBox("Click Edit orders to change the palette and order columns.", MessageType.None);
+                return;
+            }
+
+            if (!_orders.CanAcceptPaletteTiles())
+            {
+                EditorGUILayout.HelpBox("Click Add order first, then use the palette to fill the new order column.", MessageType.Info);
                 return;
             }
 
@@ -197,7 +218,10 @@ namespace LevelEditor
                 var kind = (TileKind)i;
                 var rect = GUILayoutUtility.GetRect(TileButtonSize, TileButtonSize, GUILayout.Width(TileButtonSize), GUILayout.Height(TileButtonSize));
                 if (EditorTileIcons.TileButton(rect, kind))
+                {
                     _orders.AddFromPalette(kind, (int)_addAmount);
+                    MaintainOrderColumnIndices();
+                }
                 if (i % perRow == perRow - 1 || i == kindCount - 1)
                     EditorGUILayout.EndHorizontal();
             }
@@ -206,42 +230,38 @@ namespace LevelEditor
         void DrawOrdersSection()
         {
             EditorGUILayout.LabelField("Orders", EditorStyles.boldLabel);
-            _orderScroll = EditorGUILayout.BeginScrollView(_orderScroll, GUILayout.MinHeight(120f), GUILayout.MaxHeight(200f));
 
-            // Always show live orders only: tiles still waiting to be placed.
-            // Existing levels start with empty live columns (everything is already on the board);
-            // tiles appear here only after they are removed from the board.
-            _orders.RecomputeActiveColumnIndices(out var activeCols);
-            var columns = _orders.Columns;
-            EditorGUILayout.BeginHorizontal();
-            for (var ci = 0; ci < columns.Count; ci++)
+            var isEditMode = !_orders.IsFinalized;
+
+            if (!isEditMode && _orders.HasOrderSnapshot && _orders.AreAllColumnsEmpty())
             {
-                var col = columns[ci];
-                EditorGUILayout.BeginVertical(GUILayout.Width(TileButtonSize + 8f));
-                EditorGUILayout.LabelField($"#{ci + 1}", EditorStyles.centeredGreyMiniLabel, GUILayout.Width(TileButtonSize + 4f));
-                for (var ti = 0; ti < col.Count; ti++)
-                {
-                    var kind = col[ti];
-                    var rect = GUILayoutUtility.GetRect(TileButtonSize, TileButtonSize, GUILayout.Width(TileButtonSize), GUILayout.Height(TileButtonSize));
-                    var isActive = _orders.IsFinalized && _placeMode == PlaceMode.Place && activeCols.Contains(ci);
-                    var tint = isActive ? new Color(0.82f, 1f, 0.88f, 1f) : Color.white;
-                    if (EditorTileIcons.TileButton(rect, kind))
-                        HandleOrderTileClick(ci, ti);
-                    EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 3f), tint);
-                }
-
-                EditorGUILayout.EndVertical();
+                var nextOrder = _orders.NextAppendOrderNumber;
+                EditorGUILayout.HelpBox(
+                    $"All tiles are on the board. Click Edit orders, then Add order or use the palette to append order #{nextOrder}.",
+                    MessageType.Info);
             }
-
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.EndScrollView();
+            else if (isEditMode && _orders.HasOrderSnapshot && _orders.AreAllColumnsEmpty() &&
+                     !_orders.CanAcceptPaletteTiles())
+            {
+                var nextOrder = _orders.NextAppendOrderNumber;
+                EditorGUILayout.HelpBox(
+                    $"Click Add order to open order #{nextOrder}, then use the palette. Existing orders stay on the board until you remove tiles.",
+                    MessageType.Info);
+            }
+            else
+            {
+                DrawOrderColumns(isEditMode);
+            }
 
             EditorGUILayout.BeginHorizontal();
             EditorGUI.BeginDisabledGroup(_orders.IsFinalized);
             if (GUILayout.Button("Add order"))
                 _orders.AddOrderColumn();
             if (GUILayout.Button("Clear active column"))
+            {
                 _orders.ClearActiveColumn();
+                MaintainOrderColumnIndices();
+            }
 
             EditorGUI.EndDisabledGroup();
 
@@ -251,8 +271,8 @@ namespace LevelEditor
             EditorGUI.EndDisabledGroup();
 
             EditorGUI.BeginDisabledGroup(!_orders.IsFinalized);
-            if (GUILayout.Button("Unlock orders", GUILayout.Width(120f)))
-                UnlockOrders();
+            if (GUILayout.Button("Edit orders", GUILayout.Width(120f)))
+                EditOrders();
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
 
@@ -274,6 +294,91 @@ namespace LevelEditor
             }
         }
 
+        void DrawOrderColumns(bool editMode)
+        {
+            _orderScroll = EditorGUILayout.BeginScrollView(_orderScroll, GUILayout.MinHeight(120f), GUILayout.MaxHeight(200f));
+
+            _orders.RecomputeActiveColumnIndices(out var activeCols);
+            var columns = _orders.Columns;
+            var activeColumnIndex = columns.Count - 1;
+            var displayOrderNumber = 0;
+            EditorGUILayout.BeginHorizontal();
+            for (var ci = 0; ci < columns.Count; ci++)
+            {
+                var col = columns[ci];
+                if (!ShouldShowOrderColumn(ci, col.Count, editMode, columns.Count, _orders.HasOrderSnapshot, _orders.SnapshotOrderCount))
+                    continue;
+
+                displayOrderNumber++;
+                EditorGUILayout.BeginVertical(GUILayout.Width(TileButtonSize + 8f));
+                var isActiveColumn = editMode && ci == activeColumnIndex;
+                var headerStyle = isActiveColumn ? EditorStyles.boldLabel : EditorStyles.centeredGreyMiniLabel;
+                EditorGUILayout.LabelField($"#{displayOrderNumber}", headerStyle, GUILayout.Width(TileButtonSize + 4f));
+
+                if (col.Count == 0 && editMode)
+                {
+                    var rect = GUILayoutUtility.GetRect(TileButtonSize, TileButtonSize, GUILayout.Width(TileButtonSize), GUILayout.Height(TileButtonSize));
+                    var slotColor = isActiveColumn
+                        ? new Color(0.22f, 0.30f, 0.38f, 1f)
+                        : new Color(0.16f, 0.16f, 0.18f, 1f);
+                    EditorTileIcons.DrawEmptySlot(rect, slotColor);
+                    if (isActiveColumn)
+                        EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 3f, rect.width, 3f), new Color(0.45f, 0.75f, 1f, 1f));
+                }
+                else
+                {
+                    for (var ti = 0; ti < col.Count; ti++)
+                    {
+                        var kind = col[ti];
+                        var rect = GUILayoutUtility.GetRect(TileButtonSize, TileButtonSize, GUILayout.Width(TileButtonSize), GUILayout.Height(TileButtonSize));
+                        var isActiveOrder = !editMode && _placeMode == PlaceMode.Place && CanUseBoardTools() &&
+                                            activeCols.Contains(ci);
+                        var tileTint = isActiveOrder ? new Color(0.72f, 1f, 0.78f, 1f) : Color.white;
+                        if (EditorTileIcons.TileButton(rect, kind, selected: isActiveOrder, tint: tileTint))
+                            HandleOrderTileClick(ci, ti);
+                        DrawOrderTileActiveIndicator(rect, isActiveOrder, showInactiveBar: !editMode && _orders.IsFinalized);
+                    }
+                }
+
+                EditorGUILayout.EndVertical();
+            }
+
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndScrollView();
+        }
+
+        static void DrawOrderTileActiveIndicator(Rect rect, bool isActive, bool showInactiveBar)
+        {
+            if (isActive)
+            {
+                var green = new Color(0.1f, 0.88f, 0.32f, 1f);
+                const float bar = 6f;
+                const float side = 3f;
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, bar), green);
+                EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - bar, rect.width, bar), green);
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, side, rect.height), green);
+                EditorGUI.DrawRect(new Rect(rect.xMax - side, rect.y, side, rect.height), green);
+                return;
+            }
+
+            if (!showInactiveBar) return;
+            EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 2f), new Color(0.5f, 0.5f, 0.54f, 1f));
+        }
+
+        static bool ShouldShowOrderColumn(
+            int columnIndex,
+            int tileCount,
+            bool editMode,
+            int columnCount,
+            bool hasOrderSnapshot,
+            int snapshotOrderCount)
+        {
+            if (tileCount > 0) return true;
+            if (!editMode) return false;
+            if (!hasOrderSnapshot) return true;
+            return columnIndex >= snapshotOrderCount && columnIndex == columnCount - 1;
+        }
+
         void DrawBoardSection()
         {
             EditorGUILayout.LabelField("Board", EditorStyles.boldLabel);
@@ -281,10 +386,12 @@ namespace LevelEditor
                 _board.EnsureGrid();
 
             string toolLabel;
-            if (!_orders.IsFinalized && !_orders.HasOrderSnapshot)
+            if (!CanUseBoardTools())
                 toolLabel = "Build orders, then Finalize to place tiles on the board.";
+            else if (IsEditOrdersMode)
+                toolLabel = "Edit orders: use the palette and order columns. Place, Remove, and Remove all are disabled until you finalize again.";
             else if (_placeMode == PlaceMode.Remove)
-                toolLabel = "Remove tool: left-click a clickable top tile — it leaves the board and appears in its original order column.";
+                toolLabel = "Remove tool: left-click a clickable top board tile or a rack tile — it returns to its original order column.";
             else
                 toolLabel = "Place tool: left-click places the hand tile from orders/rack onto the board.";
             EditorGUILayout.HelpBox(
@@ -316,9 +423,8 @@ namespace LevelEditor
             EditorGUILayout.BeginVertical(GUILayout.Width(150f));
             EditorGUILayout.LabelField("Tools", EditorStyles.boldLabel);
 
-            // Board tools stay available whenever we have a known order snapshot (loaded level /
-            // previously finalized) — including after Unlock, when live order strips may be empty.
-            var toolsEnabled = _orders.IsFinalized || _orders.HasOrderSnapshot;
+            // Board tools are disabled while editing order columns.
+            var toolsEnabled = CanInteractWithBoard();
             EditorGUI.BeginDisabledGroup(!toolsEnabled);
             var toolIndex = _placeMode == PlaceMode.Place ? 0 : 1;
             var nextToolIndex = GUILayout.Toolbar(toolIndex, new[] { "Place", "Remove" }, GUILayout.Width(140f));
@@ -331,11 +437,13 @@ namespace LevelEditor
             EditorGUI.EndDisabledGroup();
 
             EditorGUILayout.HelpBox(
-                !toolsEnabled
+                !CanUseBoardTools()
                     ? "Finalize orders to enable Place / Remove."
-                    : _placeMode == PlaceMode.Remove
-                        ? "Remove: click a top tile → order."
-                        : "Place: put hand / rack tiles on the board.",
+                    : IsEditOrdersMode
+                        ? "Board tools are off during Edit orders. Click order tiles to remove them, or Finalize orders when done."
+                        : _placeMode == PlaceMode.Remove
+                            ? "Remove: click a board or rack tile → order."
+                            : "Place: put hand / rack tiles on the board.",
                 MessageType.None);
 
             EditorGUILayout.EndVertical();
@@ -413,13 +521,20 @@ namespace LevelEditor
                 GUI.Label(badge, layer.ToString(), LayerBadgeStyle);
             }
 
-            if (evt.type == EventType.MouseDown && area.Contains(evt.mousePosition) &&
-                TryPointerToPlacement(evt.mousePosition, ox, oy, pw, ph, out var cpx, out var cpy))
+            if (evt.type == EventType.MouseDown && area.Contains(evt.mousePosition))
             {
-                if (evt.button == 0)
-                    HandleBoardLeftClick(cpx, cpy);
-                else if (evt.button == 1)
-                    HandleBoardRightClick(cpx, cpy);
+                if (_placeMode == PlaceMode.Remove && evt.button == 0)
+                {
+                    if (TryPointerToTopTile(evt.mousePosition, ox, oy, ph, out var hitPx, out var hitPy))
+                        HandleBoardLeftClick(hitPx, hitPy);
+                }
+                else if (TryPointerToPlacement(evt.mousePosition, ox, oy, pw, ph, out var cpx, out var cpy))
+                {
+                    if (evt.button == 0)
+                        HandleBoardLeftClick(cpx, cpy);
+                    else if (evt.button == 1)
+                        HandleBoardRightClick(cpx, cpy);
+                }
                 evt.Use();
                 Repaint();
             }
@@ -451,6 +566,25 @@ namespace LevelEditor
             return new Rect(c.x - TileDrawSize * 0.5f, c.y - TileDrawSize * 0.5f, TileDrawSize, TileDrawSize);
         }
 
+        bool TryPointerToTopTile(Vector2 pointer, float ox, float oy, int placementHeight, out int px, out int py)
+        {
+            px = -1;
+            py = -1;
+
+            for (var i = _drawOrderScratch.Count - 1; i >= 0; i--)
+            {
+                var item = _drawOrderScratch[i];
+                if (!TileRect(item.px, item.py, ox, oy, placementHeight).Contains(pointer))
+                    continue;
+
+                px = item.px;
+                py = item.py;
+                return true;
+            }
+
+            return false;
+        }
+
         void UpdateBoardHover(Vector2 pointer, float ox, float oy, int pw, int ph)
         {
             _hoverPx = -1;
@@ -461,7 +595,7 @@ namespace LevelEditor
 
             _hoverPx = px;
             _hoverPy = py;
-            if (!_orders.IsFinalized && !_orders.HasOrderSnapshot)
+            if (!CanInteractWithBoard())
                 _hoverValid = false;
             else if (_placeMode == PlaceMode.Remove)
                 _hoverValid = IsRemovableTop(px, py);
@@ -527,18 +661,10 @@ namespace LevelEditor
 
         void HandleOrderTileClick(int columnIndex, int tileIndex)
         {
-            if (!_orders.IsFinalized)
+            if (IsEditOrdersMode || !_orders.IsFinalized)
             {
-                // Unlocked: if we have a snapshot (editing an existing / previously finalized level),
-                // picking an order tile puts it in hand for Place. Otherwise editing removes from the active column.
-                if (_orders.HasOrderSnapshot)
-                {
-                    PickHandFromOrder(columnIndex, tileIndex, requireActiveOnly: false);
-                    return;
-                }
-
-                if (columnIndex == _orders.Columns.Count - 1)
-                    _orders.RemoveTileFromColumn(columnIndex, tileIndex);
+                _orders.RemoveTileFromColumn(columnIndex, tileIndex);
+                MaintainOrderColumnIndices();
                 return;
             }
 
@@ -572,7 +698,7 @@ namespace LevelEditor
 
         void HandleBoardLeftClick(int px, int py)
         {
-            if (!_orders.IsFinalized && !_orders.HasOrderSnapshot) return;
+            if (!CanInteractWithBoard()) return;
 
             if (_placeMode == PlaceMode.Remove)
             {
@@ -588,7 +714,7 @@ namespace LevelEditor
 
         void HandleBoardRightClick(int px, int py)
         {
-            if (!_orders.IsFinalized && !_orders.HasOrderSnapshot) return;
+            if (!CanInteractWithBoard()) return;
             if (_placeMode == PlaceMode.Remove) return;
             if (!_board.TryRemoveTopAt(px, py)) return;
             _validationMessage = "";
@@ -597,8 +723,9 @@ namespace LevelEditor
         /// <summary>Only the topmost tile at a cell that isn't covered by an overlapping neighbour can be removed.</summary>
         bool IsRemovableTop(int px, int py)
         {
-            if (!_board.TryGetTopTileAt(px, py, out var layer, out _)) return false;
-            return TileClickability.IsClickable(_board.Cells, px, py, layer);
+            // Treat any top tile at this placement as removable for the Remove tool.
+            // The board model already guarantees we only ever take the visible top tile.
+            return _board.TryGetTopTileAt(px, py, out _, out _);
         }
 
         /// <summary>
@@ -630,9 +757,14 @@ namespace LevelEditor
 
         void HandleRackClick(int slot)
         {
-            if (_placeMode == PlaceMode.Remove) return;
-            if (!_orders.IsFinalized && !_orders.HasOrderSnapshot) return;
-            if (_phase != EditorPhase.PlacingTiles && !_orders.HasOrderSnapshot) return;
+            if (!CanInteractWithBoard()) return;
+
+            if (_placeMode == PlaceMode.Remove)
+            {
+                RemoveRackTileToOrders(slot);
+                return;
+            }
+
             _phase = EditorPhase.PlacingTiles;
             var rack = _board.RackSlots;
             if (rack == null) return;
@@ -646,6 +778,29 @@ namespace LevelEditor
             if (_handKind == TileKind.None) return;
             if (!_board.TryPlaceInRack(slot, _handKind, _handOrderColumnIndex, _handOrderSnapIcon)) return;
             AdvanceHandAfterPlacement();
+        }
+
+        /// <summary>
+        /// Pull a rack tile off and restore it into its exact original order column + icon slot.
+        /// </summary>
+        void RemoveRackTileToOrders(int slot)
+        {
+            var rack = _board.RackSlots;
+            if (rack == null || !rack[slot].HasValue) return;
+
+            if (!_board.TryTakeFromRack(slot, out var kind, out var orderCol, out var orderIcon)) return;
+
+            if (_orders.TryReturnTileToOrders(kind, orderCol, orderIcon))
+            {
+                _statusMessage = orderCol >= 0 && orderIcon >= 0
+                    ? $"Removed {(int)kind} ({kind}) from rack → order #{orderCol + 1}, icon #{orderIcon + 1}."
+                    : $"Removed {(int)kind} ({kind}) from rack → back to its order.";
+                _validationMessage = "";
+                return;
+            }
+
+            _board.TryPlaceInRack(slot, kind, orderCol, orderIcon);
+            _statusMessage = "Could not return rack tile to orders — removal cancelled.";
         }
 
         void PickHandFromOccupiedRackSlot(int slot)
@@ -713,6 +868,13 @@ namespace LevelEditor
         {
             if (_orders.IsFinalized) return;
 
+            ReturnHandToSource(_handKind, _handFromRack, _handOrderColumnIndex, _handOrderSnapIcon, _handRackSlotIndex);
+            _handKind = TileKind.None;
+            _handFromRack = false;
+            _handOrderColumnIndex = -1;
+            _handOrderSnapIcon = -1;
+            _handRackSlotIndex = -1;
+
             var cols = _orders.Columns;
             var hasLiveTiles = false;
             for (var i = 0; i < cols.Count; i++)
@@ -727,7 +889,12 @@ namespace LevelEditor
                 return;
             }
 
-            _orders.Finalize();
+            _pendingOrderTilesScratch.Clear();
+            if (_orders.HasOrderSnapshot)
+                _board.CollectTilesOriginatingFromOrderColumnAtLeast(_orders.SnapshotOrderCount, _pendingOrderTilesScratch);
+
+            _orders.Finalize(_pendingOrderTilesScratch);
+            MaintainOrderColumnIndices();
             if (_board.CollectBoardKindInts().Count == 0)
                 _board.ClearBoardAndRack();
             _phase = EditorPhase.PlacingTiles;
@@ -753,7 +920,7 @@ namespace LevelEditor
 
         void SetPlaceMode(PlaceMode mode)
         {
-            if (!_orders.IsFinalized && !_orders.HasOrderSnapshot) return;
+            if (!CanInteractWithBoard()) return;
             _placeMode = mode;
             _phase = EditorPhase.PlacingTiles;
 
@@ -767,7 +934,7 @@ namespace LevelEditor
                 _handOrderSnapIcon = -1;
                 _handRackSlotIndex = -1;
                 _orders.SyncReverseCursorFromLiveColumns();
-                _statusMessage = "Remove tool: click a top tile — it goes back to its original order slot.";
+                _statusMessage = "Remove tool: click a top board tile or rack tile — it goes back to its original order slot.";
                 return;
             }
 
@@ -789,10 +956,18 @@ namespace LevelEditor
             }
         }
 
-        void UnlockOrders()
+        void EditOrders()
         {
+            ReturnHandToSource(_handKind, _handFromRack, _handOrderColumnIndex, _handOrderSnapIcon, _handRackSlotIndex);
             _orders.UnlockPreserveLiveState();
-            // Keep PlacingTiles so Place/Remove still work; palette becomes usable for authoring.
+            MaintainOrderColumnIndices();
+            var existingPendingColumns = _orders.HasOrderSnapshot
+                ? _orders.ComputeMinPendingColumnsToKeep(_board.GetMaxOriginOrderColumn())
+                : 0;
+            // Preserve pending orders that may currently exist only on the board, plus one extra draft
+            // column so palette edits always target a real "new order" column instead of a snapshot order.
+            _orders.EnsurePendingColumnCount(existingPendingColumns + 1);
+            // Keep PlacingTiles phase; board interaction is gated by CanInteractWithBoard().
             _phase = EditorPhase.PlacingTiles;
             _placeMode = PlaceMode.Place;
             _handKind = TileKind.None;
@@ -800,17 +975,29 @@ namespace LevelEditor
             _handOrderColumnIndex = -1;
             _handOrderSnapIcon = -1;
             _handRackSlotIndex = -1;
-            _statusMessage = "Orders unlocked. Place/Remove stay available. Finalize again when ready (empty live orders OK if tiles are already on the board).";
+            _statusMessage = "Editing orders. Use the palette and order columns. Click order tiles to remove them. Finalize when done.";
         }
 
         void RemoveAllTilesToOrders()
         {
-            if (!_orders.IsFinalized && !_orders.HasOrderSnapshot) return;
+            if (!CanInteractWithBoard()) return;
+
+            ReturnHandToSource(_handKind, _handFromRack, _handOrderColumnIndex, _handOrderSnapIcon, _handRackSlotIndex);
+
+            // Sync live pending columns with board provenance before capture.
+            MaintainOrderColumnIndices();
+
+            _pendingOrderTilesScratch.Clear();
+            if (_orders.HasOrderSnapshot)
+                _board.CollectTilesOriginatingFromOrderColumnAtLeast(_orders.SnapshotOrderCount, _pendingOrderTilesScratch);
+
+            var minPendingColumns = _orders.HasOrderSnapshot
+                ? _orders.ComputeMinPendingColumnsToKeep(_board.GetMaxOriginOrderColumn(), _pendingOrderTilesScratch)
+                : 0;
 
             _board.ClearBoardAndRack();
 
-            // Make all finalized order icons available again for placement.
-            _orders.LoadLiveFromSnapshotForPlacement();
+            _orders.RestoreLiveOrdersAfterRemoveAll(_pendingOrderTilesScratch, minPendingColumns);
 
             _phase = EditorPhase.PlacingTiles;
             _placeMode = PlaceMode.Place;
@@ -821,8 +1008,11 @@ namespace LevelEditor
             _handRackSlotIndex = -1;
             _validationMessage = "";
 
-            // Start the placement hand from orders (same flow as finalize).
-            SetPlaceMode(PlaceMode.Place);
+            if (!IsEditOrdersMode)
+                SetPlaceMode(PlaceMode.Place);
+            else
+                _placeMode = PlaceMode.Place;
+
             _statusMessage = "Removed all board tiles → orders full again.";
         }
 
@@ -881,6 +1071,27 @@ namespace LevelEditor
                 return;
             }
 
+            if (_orders.HasOrderSnapshot && !_orders.IsFinalized)
+            {
+                _pendingOrderTilesScratch.Clear();
+                _board.CollectTilesOriginatingFromOrderColumnAtLeast(_orders.SnapshotOrderCount, _pendingOrderTilesScratch);
+                var hasPendingLive = false;
+                var cols = _orders.Columns;
+                for (var c = _orders.SnapshotOrderCount; c < cols.Count; c++)
+                {
+                    if (cols[c].Count > 0) { hasPendingLive = true; break; }
+                }
+
+                if (_pendingOrderTilesScratch.Count > 0 || hasPendingLive)
+                {
+                    EditorUtility.DisplayDialog(
+                        "Export blocked",
+                        "You have new orders that are not finalized. Click Finalize orders before export.",
+                        "OK");
+                    return;
+                }
+            }
+
             var boardKinds = _board.CollectBoardKindInts();
             var orderFlat = LevelEditorBoardModel.FlattenOrders(ordersDto);
             if (orderFlat.Count == 0)
@@ -891,10 +1102,15 @@ namespace LevelEditor
 
             if (!LevelEditorBoardModel.MultisetsEqualSorted(boardKinds, orderFlat))
             {
-                EditorUtility.DisplayDialog(
-                    "Export failed",
-                    "Board tiles do not match the orders. Place every order/rack tile back on the board (or remove extras) so the counts match.",
-                    "OK");
+                _pendingOrderTilesScratch.Clear();
+                if (_orders.HasOrderSnapshot)
+                    _board.CollectTilesOriginatingFromOrderColumnAtLeast(_orders.SnapshotOrderCount, _pendingOrderTilesScratch);
+
+                var message = _pendingOrderTilesScratch.Count > 0
+                    ? "Board tiles do not match the export snapshot. New order tiles are on the board but were not captured — click Finalize orders, then export again."
+                    : "Board tiles do not match the orders. Place every order/rack tile back on the board (or remove extras) so the counts match.";
+
+                EditorUtility.DisplayDialog("Export failed", message, "OK");
                 return;
             }
 

@@ -326,6 +326,99 @@ namespace LevelEditor
             return false;
         }
 
+        public void CollectTilesOriginatingFromOrderColumnAtLeast(
+            int minOrderCol,
+            List<(TileKind kind, int orderCol, int orderIcon)> results)
+        {
+            if (results == null) return;
+            if (_cells != null)
+            {
+                var pw = _cells.GetLength(0);
+                var ph = _cells.GetLength(1);
+                var d = _cells.GetLength(2);
+                for (var l = 0; l < d; l++)
+                for (var y = 0; y < ph; y++)
+                for (var x = 0; x < pw; x++)
+                {
+                    var v = _cells[x, y, l];
+                    if (!v.HasValue) continue;
+                    var col = _orderCol[x, y, l];
+                    if (col < minOrderCol) continue;
+                    results.Add((v.Value, col, _orderIcon[x, y, l]));
+                }
+            }
+
+            if (_rackSlots == null || _rackOrderCol == null) return;
+            for (var i = 0; i < _rackSlots.Length; i++)
+            {
+                if (!_rackSlots[i].HasValue) continue;
+                var col = _rackOrderCol[i];
+                if (col < minOrderCol) continue;
+                results.Add((_rackSlots[i].Value, col, _rackOrderIcon[i]));
+            }
+        }
+
+        public int GetMaxOriginOrderColumn()
+        {
+            var max = -1;
+            if (_cells != null)
+            {
+                var pw = _cells.GetLength(0);
+                var ph = _cells.GetLength(1);
+                var d = _cells.GetLength(2);
+                for (var l = 0; l < d; l++)
+                for (var y = 0; y < ph; y++)
+                for (var x = 0; x < pw; x++)
+                {
+                    if (!_cells[x, y, l].HasValue) continue;
+                    max = Mathf.Max(max, _orderCol[x, y, l]);
+                }
+            }
+
+            if (_rackSlots != null && _rackOrderCol != null)
+            {
+                for (var i = 0; i < _rackSlots.Length; i++)
+                {
+                    if (!_rackSlots[i].HasValue) continue;
+                    max = Mathf.Max(max, _rackOrderCol[i]);
+                }
+            }
+
+            return max;
+        }
+
+        public void RemapOrderColumnIndices(IReadOnlyDictionary<int, int> oldToNew, int minAffectedColumn)
+        {
+            if (oldToNew == null || oldToNew.Count == 0) return;
+
+            if (_cells != null)
+            {
+                var pw = _cells.GetLength(0);
+                var ph = _cells.GetLength(1);
+                var d = _cells.GetLength(2);
+                for (var l = 0; l < d; l++)
+                for (var y = 0; y < ph; y++)
+                for (var x = 0; x < pw; x++)
+                {
+                    if (!_cells[x, y, l].HasValue) continue;
+                    var col = _orderCol[x, y, l];
+                    if (col < minAffectedColumn) continue;
+                    if (oldToNew.TryGetValue(col, out var mapped))
+                        _orderCol[x, y, l] = mapped;
+                }
+            }
+
+            if (_rackSlots == null || _rackOrderCol == null) return;
+            for (var i = 0; i < _rackSlots.Length; i++)
+            {
+                if (!_rackSlots[i].HasValue) continue;
+                var col = _rackOrderCol[i];
+                if (col < minAffectedColumn) continue;
+                if (oldToNew.TryGetValue(col, out var mapped))
+                    _rackOrderCol[i] = mapped;
+            }
+        }
+
         public bool TryPlaceInFirstEmptyRack(TileKind kind) =>
             TryPlaceInFirstEmptyRack(kind, -1, -1);
 

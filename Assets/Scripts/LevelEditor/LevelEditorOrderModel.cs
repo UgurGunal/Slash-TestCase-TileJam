@@ -14,6 +14,7 @@ namespace LevelEditor
         // Parallel to _columns: for each live icon, the original snapshot icon index in that column.
         readonly List<List<int>> _liveSnapIcons = new List<List<int>>();
         List<List<TileKind>> _snapshotAtFinalize;
+        int _immutableSnapshotColumnCount;
         readonly List<ReverseItem> _reverseQueue = new List<ReverseItem>();
         readonly List<int> _plannedRackTiles = new List<int>();
         int _reverseIndex;
@@ -47,6 +48,14 @@ namespace LevelEditor
 
         public IReadOnlyList<IReadOnlyList<TileKind>> SnapshotColumns =>
             _snapshotAtFinalize == null ? _columns : _snapshotAtFinalize;
+
+        public int SnapshotOrderCount => _snapshotAtFinalize?.Count ?? 0;
+
+        /// <summary>Snapshot columns that always reset from the saved snapshot on remove-all.</summary>
+        public int ImmutableSnapshotColumnCount => _immutableSnapshotColumnCount;
+
+        /// <summary>Next order number when appending to an existing finalized level.</summary>
+        public int NextAppendOrderNumber => SnapshotOrderCount + 1;
 
         int SnapshotTileCount()
         {
@@ -82,6 +91,7 @@ namespace LevelEditor
             _columns.Add(new List<TileKind>());
             _liveSnapIcons.Add(new List<int>());
             _snapshotAtFinalize = null;
+            _immutableSnapshotColumnCount = 0;
             _finalized = false;
             StopReverseBuild();
         }
@@ -96,9 +106,34 @@ namespace LevelEditor
             StopReverseBuild();
         }
 
+        public bool CanAcceptPaletteTiles()
+        {
+            if (_finalized) return false;
+            if (_snapshotAtFinalize == null) return true;
+            return _columns.Count > GetMutableColumnStart();
+        }
+
+        /// <summary>
+        /// Ensure there are at least <paramref name="pendingColumnCount"/> live columns after the
+        /// snapshot block. Used to preserve board-only pending orders and reserve one extra draft slot
+        /// for palette edits.
+        /// </summary>
+        public void EnsurePendingColumnCount(int pendingColumnCount)
+        {
+            if (_finalized || _snapshotAtFinalize == null) return;
+            pendingColumnCount = Mathf.Max(0, pendingColumnCount);
+            var targetCount = _snapshotAtFinalize.Count + pendingColumnCount;
+            while (_columns.Count < targetCount)
+            {
+                _columns.Add(new List<TileKind>());
+                _liveSnapIcons.Add(new List<int>());
+            }
+        }
+
         public void AddFromPalette(TileKind kind, int amount)
         {
             if (_finalized || kind == TileKind.None || amount < 1) return;
+            if (!CanAcceptPaletteTiles()) return;
             EnsureAtLeastOneColumn();
             var col = _columns[_columns.Count - 1];
             var icons = _liveSnapIcons[_columns.Count - 1];
@@ -132,7 +167,6 @@ namespace LevelEditor
         {
             if (_finalized) return;
             if ((uint)columnIndex >= (uint)_columns.Count) return;
-            if (columnIndex != _columns.Count - 1) return;
             var col = _columns[columnIndex];
             if ((uint)tileIndex >= (uint)col.Count) return;
             col.RemoveAt(tileIndex);
@@ -143,20 +177,30 @@ namespace LevelEditor
         {
             if (_finalized) return;
             EnsureAtLeastOneColumn();
-            if (_columns[_columns.Count - 1].Count == 0) return;
+
+            var lastIdx = _columns.Count - 1;
+            if (_columns[lastIdx].Count == 0)
+            {
+                if (_snapshotAtFinalize != null && _columns.Count > _snapshotAtFinalize.Count)
+                    return;
+
+                if (_snapshotAtFinalize == null)
+                    return;
+            }
+
             _columns.Add(new List<TileKind>());
             _liveSnapIcons.Add(new List<int>());
         }
 
-        public void Finalize()
+        public void Finalize(IReadOnlyList<(TileKind kind, int orderCol, int orderIcon)> boardAndRackTiles = null)
         {
             if (_finalized) return;
             _finalized = true;
 
-            // Keep an existing snapshot intact (editing an already-defined level).
-            // Rebuilding/merging would desync board provenance (orderCol/orderIcon on cells).
             if (_snapshotAtFinalize == null)
                 CaptureSnapshot();
+            else
+                AppendNewLiveColumnsToSnapshot(boardAndRackTiles);
 
             StartReverseBuild();
         }
@@ -184,26 +228,219 @@ namespace LevelEditor
 
         /// <summary>
         /// During edit: remove-all-board should make orders "full again" so the user can place every tile.
-        /// This restores live order columns from the finalized snapshot (does not change the snapshot itself).
+        /// Restores live columns from the finalized snapshot and keeps any not-yet-finalized new order columns.
         /// </summary>
-        public void LoadLiveFromSnapshotForPlacement()
+        public void LoadLiveFromSnapshotForPlacement(int minPendingColumnsToKeep = 0) =>
+            RestoreLiveOrdersAfterRemoveAll(null, minPendingColumnsToKeep);
+
+        /// <summary>
+        /// Restore snapshot orders to live strips and rebuild not-yet-finalized order columns by merging
+        /// current live pending columns with tiles collected from the board/rack (single pass, no duplicates).
+        /// </summary>
+        public void RestoreLiveOrdersAfterRemoveAll(
+            IReadOnlyList<(TileKind kind, int orderCol, int orderIcon)> boardAndRackTiles,
+            int minPendingColumnsToKeep = 0)
         {
             if (_snapshotAtFinalize == null) return;
 
+            var snapshotCount = _snapshotAtFinalize.Count;
+
+            // Live pending strips may have gaps if empty columns were compacted/trimmed earlier.
+            // Key by relative column index (0 == first pending column after the snapshot).
+            var livePendingByRelative = new Dictionary<int, (List<TileKind> kinds, List<int> icons)>();
+            var maxLiveRelative = -1;
+            for (var c = snapshotCount; c < _columns.Count; c++)
+            {
+                var rel = c - snapshotCount;
+                livePendingByRelative[rel] = (
+                    new List<TileKind>(_columns[c]),
+                    new List<int>(_liveSnapIcons[c]));
+                maxLiveRelative = Mathf.Max(maxLiveRelative, rel);
+            }
+
+            var boardByRelative = new Dictionary<int, List<(TileKind kind, int orderIcon)>>();
+            var maxRelative = -1;
+            if (boardAndRackTiles != null)
+            {
+                for (var i = 0; i < boardAndRackTiles.Count; i++)
+                {
+                    var (kind, orderCol, orderIcon) = boardAndRackTiles[i];
+                    if (kind == TileKind.None || orderCol < snapshotCount) continue;
+
+                    var rel = orderCol - snapshotCount;
+                    maxRelative = Mathf.Max(maxRelative, rel);
+                    if (!boardByRelative.TryGetValue(rel, out var list))
+                    {
+                        list = new List<(TileKind kind, int orderIcon)>();
+                        boardByRelative[rel] = list;
+                    }
+
+                    list.Add((kind, orderIcon));
+                }
+            }
+
+            var pendingCount = Mathf.Max(
+                maxLiveRelative + 1,
+                maxRelative + 1,
+                minPendingColumnsToKeep);
+
             _columns.Clear();
             _liveSnapIcons.Clear();
-            for (var c = 0; c < _snapshotAtFinalize.Count; c++)
+
+            for (var c = 0; c < snapshotCount; c++)
             {
                 var src = _snapshotAtFinalize[c];
-                var kinds = src != null ? new List<TileKind>(src) : new List<TileKind>();
-                var icons = new List<int>(kinds.Count);
-                for (var i = 0; i < kinds.Count; i++)
-                    icons.Add(i);
+                var snapKinds = src != null ? new List<TileKind>(src) : new List<TileKind>();
+                var snapIcons = new List<int>(snapKinds.Count);
+                for (var j = 0; j < snapKinds.Count; j++)
+                    snapIcons.Add(j);
+                _columns.Add(snapKinds);
+                _liveSnapIcons.Add(snapIcons);
+            }
+
+            for (var i = 0; i < pendingCount; i++)
+            {
+                var kinds = new List<TileKind>();
+                var icons = new List<int>();
+
+                if (livePendingByRelative.TryGetValue(i, out var live))
+                {
+                    kinds.AddRange(live.kinds);
+                    icons.AddRange(live.icons);
+                }
+
+                if (boardByRelative.TryGetValue(i, out var boardTiles))
+                {
+                    for (var t = 0; t < boardTiles.Count; t++)
+                    {
+                        var (kind, orderIcon) = boardTiles[t];
+                        MergeBoardTileIntoColumn(kinds, icons, kind, orderIcon);
+                    }
+                }
+
                 _columns.Add(kinds);
                 _liveSnapIcons.Add(icons);
             }
+
             EnsureAtLeastOneColumn();
             StartReverseBuildFromSnapshot();
+        }
+
+        static void MergeBoardTileIntoColumn(List<TileKind> kinds, List<int> icons, TileKind kind, int orderIcon)
+        {
+            if (orderIcon >= 0)
+            {
+                for (var i = 0; i < icons.Count; i++)
+                {
+                    if (icons[i] != orderIcon) continue;
+                    if (kinds[i] == kind) return;
+                    kinds[i] = kind;
+                    return;
+                }
+
+                var insertAt = 0;
+                while (insertAt < icons.Count && icons[insertAt] < orderIcon)
+                    insertAt++;
+                kinds.Insert(insertAt, kind);
+                icons.Insert(insertAt, orderIcon);
+                return;
+            }
+
+            for (var i = 0; i < kinds.Count; i++)
+            {
+                if (kinds[i] == kind) return;
+            }
+
+            var nextIcon = 0;
+            while (icons.Contains(nextIcon))
+                nextIcon++;
+            kinds.Add(kind);
+            icons.Add(nextIcon);
+        }
+
+        int GetMutableColumnStart()
+        {
+            if (_snapshotAtFinalize == null) return 0;
+            // Only unpublished columns beyond the snapshot may be compacted or remapped.
+            return _snapshotAtFinalize.Count;
+        }
+
+        /// <summary>
+        /// Drops empty mutable order columns and packs new orders contiguously after the immutable snapshot block.
+        /// Returns oldColumnIndex → newColumnIndex for columns that moved.
+        /// </summary>
+        public Dictionary<int, int> CompactMutableOrderColumns()
+        {
+            // No-op: do not compact/remove columns during edit/placement.
+            // Compacting shifts column indices and can collide with board provenance.
+            return new Dictionary<int, int>();
+
+            var remap = new Dictionary<int, int>();
+            var start = GetMutableColumnStart();
+            if (_columns.Count <= start) return remap;
+
+            var preserved = new List<(List<TileKind> kinds, List<int> icons)>();
+            for (var c = start; c < _columns.Count; c++)
+            {
+                if (_columns[c].Count == 0) continue;
+                var kinds = new List<TileKind>(_columns[c]);
+                var icons = new List<int>(kinds.Count);
+                for (var i = 0; i < kinds.Count; i++)
+                    icons.Add(i);
+                remap[c] = start + preserved.Count;
+                preserved.Add((kinds, icons));
+            }
+
+            while (_columns.Count > start)
+            {
+                _columns.RemoveAt(_columns.Count - 1);
+                _liveSnapIcons.RemoveAt(_liveSnapIcons.Count - 1);
+            }
+
+            for (var i = 0; i < preserved.Count; i++)
+            {
+                _columns.Add(preserved[i].kinds);
+                _liveSnapIcons.Add(preserved[i].icons);
+            }
+
+            EnsureAtLeastOneColumn();
+            return remap;
+        }
+
+        public int GetPendingOrderColumnCount()
+        {
+            if (_snapshotAtFinalize == null) return 0;
+            return Mathf.Max(0, _columns.Count - _snapshotAtFinalize.Count);
+        }
+
+        public int ComputeMinPendingColumnsToKeep(int maxOriginOrderColumn)
+        {
+            if (_snapshotAtFinalize == null) return 0;
+            var snapshotCount = _snapshotAtFinalize.Count;
+            var fromLive = GetPendingOrderColumnCount();
+            var fromBoard = maxOriginOrderColumn >= snapshotCount
+                ? maxOriginOrderColumn - snapshotCount + 1
+                : 0;
+            return Mathf.Max(fromLive, fromBoard);
+        }
+
+        public int ComputeMinPendingColumnsToKeep(
+            int maxOriginOrderColumn,
+            IReadOnlyList<(TileKind kind, int orderCol, int orderIcon)> boardAndRackTiles)
+        {
+            var maxCol = maxOriginOrderColumn;
+            if (_snapshotAtFinalize != null && boardAndRackTiles != null)
+            {
+                var snapshotCount = _snapshotAtFinalize.Count;
+                for (var i = 0; i < boardAndRackTiles.Count; i++)
+                {
+                    var col = boardAndRackTiles[i].orderCol;
+                    if (col >= snapshotCount)
+                        maxCol = Mathf.Max(maxCol, col);
+                }
+            }
+
+            return ComputeMinPendingColumnsToKeep(maxCol);
         }
 
         public void LoadFromOrders(LevelOrdersSpec orders, bool startFinalized)
@@ -269,6 +506,7 @@ namespace LevelEditor
             }
 
             EnsureAtLeastOneColumn();
+            _immutableSnapshotColumnCount = n;
             _finalized = true;
             StartReverseBuildFromSnapshot();
         }
@@ -281,19 +519,24 @@ namespace LevelEditor
         {
             if (_snapshotAtFinalize == null || kind == TileKind.None) return false;
 
-            if (orderCol >= 0 && orderIcon >= 0 &&
-                (uint)orderCol < (uint)_snapshotAtFinalize.Count)
+            if (orderCol >= 0 && orderIcon >= 0)
             {
-                var snap = _snapshotAtFinalize[orderCol];
-                if (snap != null &&
-                    (uint)orderIcon < (uint)snap.Count &&
-                    snap[orderIcon] == kind)
+                if ((uint)orderCol < (uint)_snapshotAtFinalize.Count)
+                {
+                    var snap = _snapshotAtFinalize[orderCol];
+                    if (snap != null &&
+                        (uint)orderIcon < (uint)snap.Count &&
+                        snap[orderIcon] == kind)
+                    {
+                        return InsertLiveAtSnapSlot(orderCol, orderIcon, kind);
+                    }
+                }
+                else if ((uint)orderCol < (uint)_columns.Count)
                 {
                     return InsertLiveAtSnapSlot(orderCol, orderIcon, kind);
                 }
             }
 
-            // Fallback when origin was lost: reuse kind-based insert into a column that still needs this kind.
             return TryReturnTileToOrders(kind);
         }
 
@@ -354,11 +597,23 @@ namespace LevelEditor
         void EnsureColumnCapacity(int columnIndex)
         {
             EnsureAtLeastOneColumn();
+            if (columnIndex < _columns.Count) return;
+
+            var start = GetMutableColumnStart();
+            if (columnIndex >= start)
+                CompactMutableOrderColumns();
+
             while (_columns.Count <= columnIndex)
             {
                 _columns.Add(new List<TileKind>());
                 _liveSnapIcons.Add(new List<int>());
             }
+        }
+
+        void TrimTrailingEmptyMutableColumns()
+        {
+            // No-op: do not remove empty mutable columns during edit/placement.
+            // Removing/reusing column indices can collide with board provenance (orderCol/orderIcon).
         }
 
         int CountInSnapshot(TileKind kind)
@@ -568,11 +823,7 @@ namespace LevelEditor
                 sourceSnapIcon = _liveSnapIcons[c][last];
                 col.RemoveAt(last);
                 _liveSnapIcons[c].RemoveAt(last);
-                while (_columns.Count > 1 && _columns[_columns.Count - 1].Count == 0)
-                {
-                    _columns.RemoveAt(_columns.Count - 1);
-                    _liveSnapIcons.RemoveAt(_liveSnapIcons.Count - 1);
-                }
+                TrimTrailingEmptyMutableColumns();
                 EnsureAtLeastOneColumn();
                 return removed != TileKind.None;
             }
@@ -634,11 +885,7 @@ namespace LevelEditor
             snapIcon = _liveSnapIcons[columnIndex][tileIndex];
             col.RemoveAt(tileIndex);
             _liveSnapIcons[columnIndex].RemoveAt(tileIndex);
-            while (_columns.Count > 1 && _columns[_columns.Count - 1].Count == 0)
-            {
-                _columns.RemoveAt(_columns.Count - 1);
-                _liveSnapIcons.RemoveAt(_liveSnapIcons.Count - 1);
-            }
+            TrimTrailingEmptyMutableColumns();
             EnsureAtLeastOneColumn();
             return taken != TileKind.None;
         }
@@ -735,6 +982,90 @@ namespace LevelEditor
                 for (var j = 0; j < n; j++)
                     icons.Add(j);
             }
+
+            _immutableSnapshotColumnCount = _snapshotAtFinalize.Count;
+        }
+
+        /// <summary>
+        /// When re-finalizing after unlock on an existing level, append brand-new live order columns
+        /// to the snapshot. Existing snapshot columns are left untouched so board provenance stays valid.
+        /// Merges live strips with board/rack tiles so orders already placed on the board are captured.
+        /// </summary>
+        void AppendNewLiveColumnsToSnapshot(
+            IReadOnlyList<(TileKind kind, int orderCol, int orderIcon)> boardAndRackTiles)
+        {
+            if (_snapshotAtFinalize == null) return;
+
+            var snapshotCount = _snapshotAtFinalize.Count;
+
+            var boardByCol = new Dictionary<int, List<(TileKind kind, int orderIcon)>>();
+            var maxBoardCol = -1;
+            if (boardAndRackTiles != null)
+            {
+                for (var i = 0; i < boardAndRackTiles.Count; i++)
+                {
+                    var (kind, orderCol, orderIcon) = boardAndRackTiles[i];
+                    if (kind == TileKind.None || orderCol < snapshotCount) continue;
+
+                    maxBoardCol = Mathf.Max(maxBoardCol, orderCol);
+                    if (!boardByCol.TryGetValue(orderCol, out var list))
+                    {
+                        list = new List<(TileKind kind, int orderIcon)>();
+                        boardByCol[orderCol] = list;
+                    }
+
+                    list.Add((kind, orderIcon));
+                }
+            }
+
+            var maxCol = Mathf.Max(_columns.Count - 1, maxBoardCol);
+            for (var c = snapshotCount; c <= maxCol; c++)
+            {
+                var kinds = new List<TileKind>();
+                var icons = new List<int>();
+
+                if (c < _columns.Count && _columns[c] != null)
+                {
+                    kinds.AddRange(_columns[c]);
+                    if (c < _liveSnapIcons.Count)
+                        icons.AddRange(_liveSnapIcons[c]);
+                    else
+                    {
+                        for (var i = 0; i < kinds.Count; i++)
+                            icons.Add(i);
+                    }
+                }
+
+                if (boardByCol.TryGetValue(c, out var boardTiles))
+                {
+                    for (var t = 0; t < boardTiles.Count; t++)
+                    {
+                        var (kind, orderIcon) = boardTiles[t];
+                        MergeBoardTileIntoColumn(kinds, icons, kind, orderIcon);
+                    }
+                }
+
+                if (kinds.Count == 0) continue;
+
+                _snapshotAtFinalize.Add(new List<TileKind>(kinds));
+                if (c < _liveSnapIcons.Count)
+                {
+                    var liveIcons = _liveSnapIcons[c];
+                    liveIcons.Clear();
+                    for (var i = 0; i < kinds.Count; i++)
+                        liveIcons.Add(i);
+                }
+            }
+
+            while (_columns.Count > _snapshotAtFinalize.Count &&
+                   _columns[_columns.Count - 1].Count == 0)
+            {
+                _columns.RemoveAt(_columns.Count - 1);
+                _liveSnapIcons.RemoveAt(_liveSnapIcons.Count - 1);
+            }
+
+            CompactMutableOrderColumns();
+            EnsureAtLeastOneColumn();
         }
 
         void RestoreColumnsFromSnapshot()
