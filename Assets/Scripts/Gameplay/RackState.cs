@@ -7,23 +7,25 @@ namespace Gameplay
         readonly TileKind?[] _slots;
         int _count;
 
-        public RackState()
+        public RackState(int capacity = GameConstants.RackCapacity)
         {
-            _slots = new TileKind?[GameConstants.RackCapacity];
+            if (capacity < 1) capacity = 1;
+            _slots = new TileKind?[capacity];
         }
 
+        public int Capacity => _slots.Length;
         public int Count => _count;
-        public bool IsFull => _count >= GameConstants.RackCapacity;
+        public bool IsFull => _count >= _slots.Length;
 
         public TileKind? GetSlot(int index)
         {
-            if ((uint)index >= (uint)GameConstants.RackCapacity) return null;
+            if ((uint)index >= (uint)_slots.Length) return null;
             return index < _count ? _slots[index] : null;
         }
 
         public bool TryAdd(TileKind kind)
         {
-            if (_count >= GameConstants.RackCapacity) return false;
+            if (_count >= _slots.Length) return false;
             _slots[_count++] = kind;
             return true;
         }

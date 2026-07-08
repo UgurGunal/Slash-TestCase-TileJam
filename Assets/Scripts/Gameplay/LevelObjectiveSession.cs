@@ -19,10 +19,12 @@ namespace Gameplay
         public LevelObjectiveSession(
             LevelOrdersSpec orders,
             IGameplayEventBus eventBus = null,
-            CollectPipeline collectPipeline = null)
+            CollectPipeline collectPipeline = null,
+            int rackCapacity = GameConstants.RackCapacity,
+            int activeOrderSlotCount = GameConstants.ActiveOrderSlotsCount)
         {
-            _orderSlots = new ActiveOrderSlots(orders);
-            _rack = new RackState();
+            _orderSlots = new ActiveOrderSlots(orders, activeOrderSlotCount);
+            _rack = new RackState(rackCapacity);
             _eventBus = eventBus ?? NullGameplayEventBus.Instance;
             _collectContext = new CollectSessionContext(_orderSlots, _rack, NullCollectFlowLogger.Instance, _eventBus);
             _collectPipeline = collectPipeline ?? CollectPipeline.CreateDefault();

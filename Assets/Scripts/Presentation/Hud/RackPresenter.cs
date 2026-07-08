@@ -6,12 +6,12 @@ using UnityEngine.UI;
 namespace Presentation.Hud
 {
     /// <summary>Rack slot image refresh for collected non-matching tiles.</summary>
-    public sealed class RackBarPresenter
+    public sealed class RackPresenter
     {
         readonly Image[] _rackSlotImages;
         readonly TileIconLibrary _iconLibrary;
 
-        public RackBarPresenter(Image[] rackSlotImages, TileIconLibrary iconLibrary)
+        public RackPresenter(Image[] rackSlotImages, TileIconLibrary iconLibrary)
         {
             _rackSlotImages = rackSlotImages;
             _iconLibrary = iconLibrary;
@@ -21,9 +21,10 @@ namespace Presentation.Hud
         {
             if (session == null) return;
 
-            for (var i = 0; i < GameConstants.RackCapacity; i++)
+            var count = _rackSlotImages?.Length ?? 0;
+            for (var i = 0; i < count; i++)
             {
-                var img = i < _rackSlotImages?.Length ? _rackSlotImages[i] : null;
+                var img = _rackSlotImages[i];
                 if (img == null) continue;
 
                 var slot = session.GetRackSlot(i);

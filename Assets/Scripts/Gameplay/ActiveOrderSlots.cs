@@ -20,10 +20,10 @@ namespace Gameplay
         readonly bool[][] _slotCellFulfilled;
         int _completedOrders;
 
-        public ActiveOrderSlots(LevelOrdersSpec orders)
+        public ActiveOrderSlots(LevelOrdersSpec orders, int activeSlotCount = GameConstants.ActiveOrderSlotsCount)
         {
             _orders = orders ?? throw new ArgumentNullException(nameof(orders));
-            var k = GameConstants.ActiveOrderSlotsCount;
+            var k = activeSlotCount < 1 ? 1 : activeSlotCount;
             _slotOrderIndex = new int[k];
             _slotCellFulfilled = new bool[k][];
 
@@ -38,7 +38,7 @@ namespace Gameplay
                 }
                 else
                 {
-                    _slotOrderIndex[s] = -1; // idle: no order to assign
+                    _slotOrderIndex[s] = -1; // idle: no order left to assign (happens if n < k)
                     _slotCellFulfilled[s] = null;
                 }
             }
@@ -186,7 +186,7 @@ namespace Gameplay
             }
             else
             {
-                // No more customers waiting — this HUD row stays empty until the level ends.
+                // No more customers waiting -so this HUD row stays empty until the level ends.
                 _slotOrderIndex[slot] = -1;
                 _slotCellFulfilled[slot] = null;
             }

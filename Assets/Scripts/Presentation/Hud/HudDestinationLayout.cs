@@ -8,16 +8,16 @@ namespace Presentation.Hud
     public sealed class HudDestinationLayout : IHudDestinationLayout
     {
         readonly LevelObjectiveSession _session;
-        readonly OrderStripPresenter[] _strips;
-        readonly RackBarPresenter _rack;
+        readonly OrderPresenter[] _orders;
+        readonly RackPresenter _rack;
 
         public HudDestinationLayout(
             LevelObjectiveSession session,
-            OrderStripPresenter[] strips,
-            RackBarPresenter rack)
+            OrderPresenter[] orders,
+            RackPresenter rack)
         {
             _session = session;
-            _strips = strips;
+            _orders = orders;
             _rack = rack;
         }
 
@@ -36,9 +36,9 @@ namespace Presentation.Hud
         public bool TryGetOrderIconRectTransform(int activeOrderSlot, int iconIdx, out RectTransform rect)
         {
             rect = null;
-            if (_session == null || _strips == null) return false;
-            if ((uint)activeOrderSlot >= (uint)_strips.Length) return false;
-            return _strips[activeOrderSlot].TryGetIconRectTransform(iconIdx, out rect);
+            if (_session == null || _orders == null) return false;
+            if ((uint)activeOrderSlot >= (uint)_orders.Length) return false;
+            return _orders[activeOrderSlot].TryGetIconRectTransform(iconIdx, out rect);
         }
 
         public bool TryGetRackSlotImage(int index, out Image img)

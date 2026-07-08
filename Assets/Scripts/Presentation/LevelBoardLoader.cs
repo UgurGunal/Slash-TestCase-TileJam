@@ -1,9 +1,11 @@
 using System;
 using System.Collections;
 using System.Text.RegularExpressions;
+using Core;
 using DG.Tweening;
 using Gameplay;
 using LevelData;
+using Presentation.Hud;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -25,6 +27,8 @@ namespace Presentation
         [SerializeField] bool clearExistingChildren = true;
         [SerializeField] bool loadOnAwake = true;
         [SerializeField] OrderRackHud orderRackHud;
+        [Tooltip("Drives rack capacity and active order slot count. Falls back to GameConstants when unset.")]
+        [SerializeField] HudLayoutConfig layoutConfig;
         [FormerlySerializedAs("collectFlyFeedback")]
         [SerializeField] TileCollectFly collectFly;
         [SerializeField] bool logTileCollectFlow;
@@ -217,7 +221,9 @@ namespace Presentation
             if (levelJson == null && TryParseLevelNumberFromResourcesPath(resourcesLevelPath, out var parsedLevel))
                 CurrentLevelNumber = parsedLevel;
 
-            _session = new LevelObjectiveSession(definition.Orders, _gameplayEventBus, _rulesContext.Collect)
+            var rackCapacity = layoutConfig != null ? layoutConfig.RackCapacity : GameConstants.RackCapacity;
+            var activeOrderSlotCount = layoutConfig != null ? layoutConfig.ActiveOrderSlotCount : GameConstants.ActiveOrderSlotsCount;
+            _session = new LevelObjectiveSession(definition.Orders, _gameplayEventBus, _rulesContext.Collect, rackCapacity, activeOrderSlotCount)
             {
                 CollectFlowLogger = new UnityCollectFlowLogger { IsEnabled = logTileCollectFlow }
             };
