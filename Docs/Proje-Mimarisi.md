@@ -1,8 +1,6 @@
 # Proje Mimarisi
 
-Bu doküman projenin genel mimarisini ve sistemlerin nasıl çalıştığını basit bir dille anlatır. Sadece HUD'a değil; katman yapısı, oyun akışı, tile toplama (collect) sistemi ve Order/Rack HUD gibi tüm ana sistemlere değinir.
-
-Her başlıkta önce (varsa) eski yaklaşımın kısa özeti, ardından şu anki yapının nasıl işlediği anlatılır.
+Bu doküman projenin genel mimarisini ve sistemlerin nasıl çalıştığını basit bir dille anlatır. Katman yapısı, oyun akışı, tile toplama (collect) sistemi ve Order/Rack HUD gibi ana sistemleri kapsar.
 
 ---
 
@@ -72,17 +70,7 @@ Proje beş assembly'ye (asmdef) bölünmüş. Bağımlılıklar tek yönlü akar
 
 Bir tile'a tıklandığında ne olacağını yöneten sistem. Girdi (`BoardTileView` tıklaması) → oyun kuralı (order eşleşmesi / rack) → görsel geri bildirim (uçuş animasyonu) → rack→order otomatik drenajı.
 
-### Eskiden — tek uçuşlu kilit (single-flight)
-
-`BoardTileCollectCoordinator` tek bir `_tileCollectInFlight` boolean'ı ile çalışıyordu:
-
-- Animasyon oynarken (veya order tamamlanınca gelen rack-drain zinciri sürerken) gelen yeni tıklamalar sessizce **düşüyordu** — kuyruklanmıyordu.
-- Hedef (order ikonu / rack slotu) tıklama anında `TryPeekCollectDestination` ile **okunuyor**, ama gerçek mutasyon (`TryCollectTile`) ancak tween bitince yapılıyordu. Aradaki boşlukta hiçbir şey rezerve edilmediği için gerçek eşzamanlılık (concurrency) mümkün değildi; aynı anda iki uçuş çakışabilir, rack taşabilir veya aynı order ikonu iki kez dolabilirdi.
-- Sonuç: hızlı tıklayan oyuncunun girdileri kayboluyordu, akış seri (sırayla) çalışıyordu.
-
-### Şimdi — rezervasyon + transaction + input buffer
-
-Domain seviyesinde bir **rezervasyon/transaction** katmanı eklendi. Projeksiyon durumu = commit edilmiş durum + uçuştaki (in-flight) rezervasyonlar.
+Rezervasyon/transaction katmanı sayesinde birden fazla tile aynı anda uçabilir. Projeksiyon durumu = commit edilmiş durum + uçuştaki (in-flight) rezervasyonlar.
 
 Akış:
 
@@ -124,9 +112,10 @@ session.TryReserveCollect(kind)
 |-------|-----|--------|
 | `CollectReservation` | Tek bir uçuşun rezervasyonu (hedef, rack delta, order ikonu) | Gameplay |
 | `CollectReservationBook` | Açık rezervasyonlar + toplam projeksiyon rack delta | Gameplay |
-| `LevelObjectiveSession` | `TryReserveCollect` / `TryReserveRackDrain` / `CommitReservation` / `Cancel*` transaction API'si | Gameplay |
+| `CollectReservationService` | Rezervasyon/projeksiyon mantığı: `TryPeekDestination` / `TryReserveCollect` / `TryReserveRackDrain` / `Release` | Gameplay |
+| `LevelObjectiveSession` | İnce facade; transaction API'sini `CollectReservationService`'e delege eder | Gameplay |
 | `BoardTileCollectCoordinator` | Eşzamanlı uçuş yöneticisi: aktif uçuşlar + FIFO input buffer + `PumpBuffer` | Presentation |
-| `RackDrainService` | Rack→order otomatik eşleşme adımları (değişmedi) | Gameplay |
+| `RackDrainService` | Rack→order otomatik eşleşme adımları | Gameplay |
 | `TileCollectFly` | DOTween uçuş animasyonu | Presentation |
 
 **Bilinen sınır (kabul edilen):** Projeksiyon, order ilerlemesini (bir order tamamlanınca yeni müşteri gelmesi) simüle etmez. Bu yüzden order'ı tamamlayan bir tile uçarken inen başka bir tıklama, yeni açılan order yerine rack'e gidebilir. Güvenli (asla taşmaz), nadir ve bu kapsam için kabul edilebilir.
@@ -139,39 +128,85 @@ Saf C# çekirdek. UI'dan tamamen bağımsız.
 
 | Sınıf | Rol |
 |-------|-----|
-| `LevelObjectiveSession` | Order queue, rack ve collect kurallarının facade'ı |
-| `ActiveOrderSlots` | Ekrandaki aktif müşteriler + kuyruktaki siparişler; ikon doldurma ve slot ilerletme |
+| `LevelObjectiveSession` | İnce facade; alt sistemleri kurar ve dışarıya sadeleştirilmiş bir API sunar (delegasyon) |
+| `ActiveOrderSlots` | Ekrandaki aktif müşteriler + kuyruktaki siparişler; ikon doldurma, slot ilerletme ve order eşleşme taraması |
 | `RackState` | Rack kapasitesi ve tutulan tile'lar (`TryAdd`, `RemoveAt`) |
 | `RackDrainService` | Rack'teki tile'ları uygun order'lara otomatik akıtan adımlar |
+| `CollectReservationService` | Uçuştaki (in-flight) rezervasyonlar + projeksiyonlu hedef hesabı (order ikonu / rack slotu) |
 | `CollectPipeline` + `MatchOrRackCollectHandler` | Tıklanan tile'ın önce order'a mı yoksa rack'e mi gideceğini belirleyen kural zinciri |
+
+Her sınıfın tek bir değişim ekseni var: order sırası `ActiveOrderSlots`, rack depolama `RackState`, otomatik drenaj `RackDrainService`, rezervasyon/projeksiyon `CollectReservationService`, tekil tile kuralı `CollectPipeline`. `LevelObjectiveSession` bunları birbirine bağlayan ince bir facade olarak kalır.
+
+---
+
+## Tile davranış sistemi (genişletilebilir tile'lar)
+
+Tile artık sadece bir renk (`TileKind`) enum'u değil. Her hücre bir **model** (`BoardCell`: kind + `BehaviorId` + modifier'lar) taşır ve bir **davranış** (`ITileBehavior`) ile eşleşir. Amaç: yeni bir tile tipi (kilitli, buzlu, bomba…) eklerken merkezi dosyalara `if/switch` serpiştirmek zorunda kalmamak.
+
+### Tek arayüz, tek kayıt noktası
+
+```
+ITileBehavior                         (davranışın kuralları)
+  ├─ string Id                        → BoardCell.BehaviorId ile eşleşir
+  ├─ IsClickable(...)                 → tıklanabilirlik kapısı
+  └─ CanRemoveFromBoard(cell)         → toplandığında tahtadan kalkar mı
+     + (opsiyonel) ITileCollectContributor → collect mantığını özelleştir
+
+TileBehaviorCatalog                   (enjekte edilen kayıt defteri, static değil)
+  └─ Resolve(behaviorId) → ITileBehavior (bilinmiyorsa StandardTileBehavior)
+```
+
+- **`StandardTileBehavior`**: her şeye izin veren varsayılan — **şu an shipping olan tek tile tipi**. Yeni davranışlar bundan türeyip sadece önemsedikleri seam'i override eder.
+
+Bilinçli olarak henüz somut bir özel tile (kilit/buz/bomba vb.) eklenmedi; sistem bunları eklemeye **hazır** ama gereksiz mekanik shipping edilmiyor.
+
+### Kural pipeline'ları katalogdan çözer
+
+`ClickabilityPipeline`, `GameplayRulesContext.CanRemoveFromBoard` ve collect zinciri, davranışı **`TileBehaviorCatalog`'tan** çözer. Katalog `GameCompositionRoot`'ta açıkça kurulur (gizli static lookup yok, test edilebilir):
+
+```
+GameCompositionRoot.BuildBehaviorCatalog()
+  new TileBehaviorCatalog(new ITileBehavior[] { })   // yeni davranışlar buraya
+```
+
+**Yeni tile eklemek = 1 sınıf + bu listeye 1 satır.** Collect'i değiştiren bir tile ayrıca `ITileCollectContributor` implement eder; katalog onu otomatik olarak collect zincirine ekler (`GameplayRulesContext` davranışları tarayıp collect yeteneği olanları toplar). Bilinmeyen bir `behaviorId` sessizce `standard`'a düşer.
+
+### Level JSON'da davranış (opsiyonel, geriye dönük uyumlu)
+
+`matrix3D` ile aynı şekle sahip opsiyonel bir `behaviors` matrisi. Alan yoksa (bugünkü tüm level'lar) her tile `standard`. Örnek (`"ice"` yalnızca formatı göstermek için — böyle bir davranış kayıtlı değilse `standard` gibi davranır):
+
+```json
+{
+  "width": 3, "height": 1, "depth": 1,
+  "matrix3D": [[[0, 1, 2]]],
+  "behaviors": [[["standard", "ice", "standard"]]],
+  "orders": [[0, 1, 2]]
+}
+```
+
+Veri akışı: `behaviors` → `LevelGridParser` → `LevelBoardSpec` (kind + behaviorId taşır) → `PlayableBoardState` (`BoardCell`) → `LevelBoardGrid` → `BoardTileView`. Behavior artık zincirin hiçbir yerinde düşmüyor.
+
+### Görsel
+
+`BoardTileView.ApplyBehaviorVisual(overlaySprite, tint)` ile davranışa özel overlay + renk uygulanır. Görsel metadata `TileBehaviorRegistry` (ScriptableObject: id → overlay sprite + tint) içinde; `LevelBoardGrid` çözer. Mantık (`TileBehaviorCatalog`, kod) ile görsel (`TileBehaviorRegistry`, asset) ayrıdır.
+
+### Yeni davranış nasıl eklenir? (örnek reçete)
+
+| İstediğin | Ne yap |
+|-----------|--------|
+| Tıklanabilirliği değiştir (kilit, buz…) | `class FooTileBehavior : StandardTileBehavior` → `IsClickable`/`CanRemoveFromBoard` override |
+| Collect'i değiştir | Ayrıca `ITileCollectContributor` implement et, `TryHandleCollect`'te kendi `cell.BehaviorId`'ini kontrol et |
+| Kaydet | `GameCompositionRoot.BuildBehaviorCatalog()` dizisine `new FooTileBehavior()` ekle |
+| Level'da kullan | JSON `behaviors` matrisine `"foo"` yaz |
+| Görsel ver | `TileBehaviorRegistry` asset'ine id + overlay/tint ekle |
+
+> **Not (oyun dengesi):** Board tile sayısı = order ikon toplamı olmalı (parser doğrular). Tahtadan tile *kaldıran* ya da toplanmasını engelleyen davranışlar bu değişmezliği bozabilir; böyle mekanikler için kazanma koşulunun da güncellenmesi gerekir. Bunlar yeni tile eklerken tasarım kararıdır, çatı bunları destekler.
 
 ---
 
 ## Order / Rack HUD sistemi
 
-### Eskiden — ne vardı, ne sorun çıkarıyordu?
-
-**1. Tek script, çok iş (`OrderRackHud`)**
-
-Eski `OrderRackHud` (ve arada kullanılan `OrderRackHudController`) şunların hepsini aynı yerde topluyordu: session event'lerini dinlemek, order/rack görsellerini güncellemek, tile uçuşu için hedef RectTransform bulmak, order tamamlanınca scale animasyonu, layout diagnostic log'ları. Bu, view katmanında **Single Responsibility** ihlaliydi.
-
-**2. Sahne modüler değildi**
-
-Rack slot'ları ve order satırları sahneye tek tek Image olarak konmuştu. Rack'i 6'dan 9 slota çıkarmak sahne + kod değişikliği gerektiriyordu.
-
-**3. İsimlendirme kafa karıştırıcıydı**
-
-| Eski isim | Ne anlama geliyordu | Sorun |
-|-----------|---------------------|-------|
-| `OrderStripSlot` | Bir müşteri siparişi satırı | "Strip" ve "Slot" karışıyordu |
-| `RackBar` | Oyuncunun tile tuttuğu rack | "Bar" belirsiz |
-| `OrderIcon` | Siparişteki tek bir ikon | Aslında slot (ikon + tik) |
-| `OrderRackManager` | HUD GameObject'i | Ne yaptığı isimden anlaşılmıyordu |
-| `HudBuilder` | Prefab'lardan HUD kuran script | Genel isim, spesifik değil |
-
-### Şimdi — modüler, prefab tabanlı HUD
-
-HUD prefab'lardan runtime'da kuruluyor, slot sayıları `HudLayoutConfig` ile ayarlanıyor ve her sorumluluk ayrı sınıfta.
+HUD prefab'lardan runtime'da kurulur. Slot sayıları `HudLayoutConfig` ile ayarlanır; her sorumluluk ayrı sınıftadır.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -224,19 +259,19 @@ Sahne container'ı "nereye koyayım", prefab container'ı "slot'ları nereye diz
 
 ### Sınıf sorumlulukları (HUD)
 
-| Sınıf | Rol | Eskiden neredeydi |
-|-------|-----|-------------------|
-| `OrderRackHud` | İnce MonoBehaviour facade; session bind, animasyon ayarları | Her şey buradaydı |
-| `OrderRackHudBuilder` | Prefab'lardan HUD kurar | Yoktu / `HudBuilder` |
-| `OrderRackHudBinder` | Event subscribe, refresh koordinasyonu | `OrderRackHudController` |
-| `OrderPresenter` | Bir order satırının sprite + animasyon mantığı | `OrderStripPresenter` |
-| `RackPresenter` | Rack slot Image'larını günceller | `RackBarPresenter` |
-| `OrderView` / `OrderSlotView` | Order UI görünümü | `OrderStripView` / `OrderIconView` |
-| `RackView` / `RackSlotView` | Rack UI görünümü | `RackBarView` / yoktu |
-| `HudDestinationLayout` | Tile uçuş hedefi Rect çözümü | `OrderRackHud` içindeydi |
-| `OrderRackLayoutDiagnostics` | Editor/runtime diagnostic log | `OrderRackHud` içindeydi |
+| Sınıf | Rol |
+|-------|-----|
+| `OrderRackHud` | İnce MonoBehaviour facade; session bağlar, animasyon ayarları |
+| `OrderRackHudBuilder` | Prefab'lardan HUD kurar |
+| `OrderRackHudBinder` | Event subscribe, refresh koordinasyonu |
+| `OrderPresenter` | Bir order satırının sprite + animasyon mantığı |
+| `RackPresenter` | Rack slot görsellerini günceller |
+| `OrderView` / `OrderSlotView` | Order UI görünümü |
+| `RackView` / `RackSlotView` | Rack UI görünümü |
+| `HudDestinationLayout` | Tile uçuş hedefi Rect çözümü |
+| `OrderRackLayoutDiagnostics` | Editor/runtime diagnostic log |
 
-**OrderRackHud artık ne yapmıyor?** Event dinlemiyor, görselleri güncellemiyor, rect çözmüyor, diagnostic yazmıyor. Sadece binder'a delege ediyor ve `DestinationLayout` property'si ile dışarıya canlı layout veriyor.
+`OrderRackHud` binder'a delege eder ve `DestinationLayout` property'si ile dışarıya canlı layout verir.
 
 ---
 
@@ -275,4 +310,5 @@ Böylece UI ve oyun mantığı aynı sayıları kullanır; biri 6 diğeri 9 olma
 | Order tamamlanma animasyonu | `OrderRackHud` Inspector → `orderCompleteScale*` alanları |
 | Tile uçuş hedefi | `HudDestinationLayout` (genelde dokunmana gerek yok) |
 | Eşzamanlı collect davranışı | `BoardTileCollectCoordinator` (rezervasyon + input buffer) |
+| Rezervasyon / projeksiyon mantığı | `CollectReservationService` |
 | Tile'ın order/rack kuralı | `CollectPipeline` + `MatchOrRackCollectHandler` |

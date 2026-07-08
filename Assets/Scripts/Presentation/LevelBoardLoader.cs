@@ -60,7 +60,7 @@ namespace Presentation
         bool _initialized;
         int _boardBuildGeneration;
 
-        public void Initialize(IGameplayEventBus eventBus, GameplayRulesContext rulesContext = null)
+        public void Initialize(IGameplayEventBus eventBus, GameplayRulesContext rulesContext = null, TileBehaviorRegistry behaviorVisuals = null)
         {
             if (eventBus == null)
             {
@@ -70,6 +70,7 @@ namespace Presentation
 
             _gameplayEventBus = eventBus;
             _rulesContext = rulesContext ?? GameplayRulesContext.CreateDefault();
+            _behaviorVisuals = behaviorVisuals;
             _initialized = true;
 
             if (!ValidatePresentationReferences())
@@ -88,6 +89,7 @@ namespace Presentation
             }
 
             _grid.SetClickabilityPipeline(_rulesContext.Clickability);
+            _grid.SetBehaviorVisuals(_behaviorVisuals);
             _collect.SetGameplayRules(_rulesContext);
             _collect.SetPresentationRefs(collectFly, orderRackHud);
 
@@ -96,6 +98,7 @@ namespace Presentation
         }
 
         GameplayRulesContext _rulesContext;
+        TileBehaviorRegistry _behaviorVisuals;
 
         bool ValidatePresentationReferences()
         {
@@ -200,6 +203,7 @@ namespace Presentation
             }
 
             _grid.SetClickabilityPipeline(_rulesContext.Clickability);
+            _grid.SetBehaviorVisuals(_behaviorVisuals);
             _collect.SetGameplayRules(_rulesContext);
             _collect.SetPresentationRefs(collectFly, orderRackHud);
             _collect.CancelInFlightCollect();

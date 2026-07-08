@@ -76,7 +76,19 @@ namespace Gameplay
             (uint)slot < (uint)_slotOrderIndex.Length && _slotOrderIndex[slot] < 0;
 
         /// <summary>Lowest active order slot index, then left-to-right first unfilled cell matching <paramref name="kind"/>.</summary>
-        public bool FindFirstUnfilledOrderMatch(TileKind kind, out int activeOrderSlot, out int iconIndexInOrder, out int levelOrderIndex)
+        public bool FindFirstUnfilledOrderMatch(TileKind kind, out int activeOrderSlot, out int iconIndexInOrder, out int levelOrderIndex) =>
+            FindFirstUnfilledOrderMatch(kind, null, out activeOrderSlot, out iconIndexInOrder, out levelOrderIndex);
+
+        /// <summary>
+        /// Same scan as the parameterless overload, but skips any (slot, icon) for which
+        /// <paramref name="skipIcon"/> returns true — used to make projections reservation-aware.
+        /// </summary>
+        public bool FindFirstUnfilledOrderMatch(
+            TileKind kind,
+            Func<int, int, bool> skipIcon,
+            out int activeOrderSlot,
+            out int iconIndexInOrder,
+            out int levelOrderIndex)
         {
             activeOrderSlot = -1;
             iconIndexInOrder = -1;
@@ -92,6 +104,7 @@ namespace Gameplay
                 for (var i = 0; i < order.Length; i++)
                 {
                     if (fulfilled[i]) continue;
+                    if (skipIcon != null && skipIcon(s, i)) continue;
                     if (order.GetIcon(i) != kind) continue;
                     activeOrderSlot = s;
                     iconIndexInOrder = i;

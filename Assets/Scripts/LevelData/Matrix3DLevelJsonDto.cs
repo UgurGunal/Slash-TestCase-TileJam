@@ -22,6 +22,14 @@ namespace LevelData
         [JsonProperty("matrix3D")]
         public List<List<List<int>>> Matrix3D { get; set; }
 
+        /// <summary>
+        /// Optional per-cell behavior ids, same shape as <see cref="Matrix3D"/> (<c>[layer][row][column]</c>).
+        /// Omit the field, use <c>null</c>, or <c>"standard"</c> for a normal tile; e.g. <c>"locked"</c>, <c>"ice"</c>.
+        /// When omitted entirely, every tile is standard (backward compatible).
+        /// </summary>
+        [JsonProperty("behaviors")]
+        public List<List<List<string>>> Behaviors { get; set; }
+
         /// <summary>Each entry is one order: variable-length array of tile kinds 0..14. Lengths may differ per order.</summary>
         [JsonProperty("orders")]
         public List<List<int>> Orders { get; set; }

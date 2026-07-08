@@ -28,12 +28,17 @@ namespace Presentation
         readonly RectTransform _boardRoot;
         readonly Dictionary<(int x, int y, int layer), BoardTileView> _tiles = new Dictionary<(int x, int y, int layer), BoardTileView>();
         ClickabilityPipeline _clickability = ClickabilityPipeline.CreateDefault();
+        TileBehaviorRegistry _behaviorVisuals;
 
         public LevelBoardGrid(RectTransform boardRoot) =>
             _boardRoot = boardRoot ?? throw new ArgumentNullException(nameof(boardRoot));
 
         public void SetClickabilityPipeline(ClickabilityPipeline pipeline) =>
             _clickability = pipeline ?? ClickabilityPipeline.CreateDefault();
+
+        /// <summary>Optional per-behavior visual metadata (overlay sprite + tint). Null = every tile uses base visuals.</summary>
+        public void SetBehaviorVisuals(TileBehaviorRegistry behaviorVisuals) =>
+            _behaviorVisuals = behaviorVisuals;
 
         public RectTransform BoardRoot => _boardRoot;
         public PlayableBoardState PlayState { get; private set; }
@@ -62,13 +67,14 @@ namespace Presentation
             for (var y = spec.Height - 1; y >= 0; y--)
             for (var x = 0; x < spec.Width; x++)
             {
-                if (!spec.TryGet(x, y, l, out var kind)) continue;
+                var boardCell = spec.GetBoardCell(x, y, l);
+                if (!boardCell.HasTile) continue;
 
-                var boardCell = BoardCell.FromKind(kind);
                 var view = UnityEngine.Object.Instantiate(tilePrefab, _boardRoot);
                 view.gameObject.name = $"Tile_L{l}_R{y}_C{x}";
                 var pos = GridToAnchored(spec.Width, spec.Height, x, y, cellSize);
                 view.Bind(boardCell, x, y, l, pos, cellSize, tileScale, tileIconLibrary);
+                ApplyBehaviorVisual(view, boardCell.BehaviorId);
                 view.SetClickHandler(onTileClicked);
                 _tiles[(x, y, l)] = view;
 
@@ -77,6 +83,15 @@ namespace Presentation
             }
 
             RefreshClickabilityVisuals();
+        }
+
+        void ApplyBehaviorVisual(BoardTileView view, string behaviorId)
+        {
+            if (view == null) return;
+            if (_behaviorVisuals != null && _behaviorVisuals.TryGet(behaviorId, out var def) && def != null)
+                view.ApplyBehaviorVisual(def.overlaySprite, def.tintColor);
+            else
+                view.ApplyBehaviorVisual(null, UnityEngine.Color.white);
         }
 
         static void PlayTileSpawnScaleIn(BoardTileView view, int layerIndex, TileSpawnIntroConfig cfg)

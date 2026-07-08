@@ -17,18 +17,22 @@ namespace Presentation
     {
         public const string ChildBackgroundName = "Background";
         public const string ChildIconName = "Icon";
+        public const string ChildOverlayName = "Overlay";
 
         /// <summary>Resources path prefix; loads <c>Resources/TileIcons/Type0</c> etc. when library has no sprite.</summary>
         public const string TileIconsResourcesFolder = "TileIcons";
 
         [SerializeField] Image background;
         [SerializeField] Image icon;
+        [Tooltip("Optional overlay drawn above the icon for behavior tiles (lock, ice, …). Auto-found by name if left empty.")]
+        [SerializeField] Image overlay;
         [Tooltip("Multiplied with background/icon base colors when the tile is not clickable (covered from above).")]
         [SerializeField] Color blockedTint = new Color(0.55f, 0.55f, 0.55f, 1f);
 
         Color _baseBackgroundColor = Color.white;
         Color _baseIconColor = Color.white;
         Color _activeOrderTint = Color.white;
+        Color _behaviorTint = Color.white;
         bool _clickableState = true;
         Action<BoardTileView> _clicked;
 
@@ -74,10 +78,30 @@ namespace Presentation
 
             _clickableState = true;
             _activeOrderTint = Color.white;
+            _behaviorTint = Color.white;
+            ApplyBehaviorVisual(null, Color.white);
             RefreshTintedColors();
         }
 
         public void SetClickHandler(Action<BoardTileView> onClicked) => _clicked = onClicked;
+
+        /// <summary>
+        /// Applies the per-behavior visual: an optional overlay sprite and a tint multiplied into the
+        /// tile colors. Standard tiles pass a null sprite and white tint (no visible change).
+        /// </summary>
+        public void ApplyBehaviorVisual(Sprite overlaySprite, Color tint)
+        {
+            _behaviorTint = tint;
+            if (overlay != null)
+            {
+                overlay.sprite = overlaySprite;
+                overlay.enabled = overlaySprite != null;
+                overlay.raycastTarget = false;
+                if (overlaySprite != null) overlay.preserveAspect = true;
+            }
+
+            RefreshTintedColors();
+        }
 
         public RectTransform IconRectTransform => icon != null ? icon.rectTransform : null;
 
@@ -104,10 +128,12 @@ namespace Presentation
 
         void RefreshTintedColors()
         {
+            var tint = _activeOrderTint * _behaviorTint;
+            if (!_clickableState) tint *= blockedTint;
             if (background != null)
-                background.color = _clickableState ? _baseBackgroundColor * _activeOrderTint : _baseBackgroundColor * _activeOrderTint * blockedTint;
+                background.color = _baseBackgroundColor * tint;
             if (icon != null)
-                icon.color = _clickableState ? _baseIconColor * _activeOrderTint : _baseIconColor * _activeOrderTint * blockedTint;
+                icon.color = _baseIconColor * tint;
         }
 
         public void OnPointerClick(PointerEventData eventData) => _clicked?.Invoke(this);
@@ -142,6 +168,8 @@ namespace Presentation
                 background = transform.Find(ChildBackgroundName)?.GetComponent<Image>();
             if (icon == null)
                 icon = transform.Find(ChildIconName)?.GetComponent<Image>();
+            if (overlay == null)
+                overlay = transform.Find(ChildOverlayName)?.GetComponent<Image>();
         }
 
         void EnsureChildWithImage(string childName, int siblingIndex)

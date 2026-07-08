@@ -14,7 +14,7 @@ namespace Gameplay
         readonly IGameplayEventBus _eventBus;
         readonly CollectSessionContext _collectContext;
         readonly CollectPipeline _collectPipeline;
-        readonly CollectReservationBook _reservationBook = new CollectReservationBook();
+        readonly CollectReservationService _reservations = new CollectReservationService();
         bool _failed;
 
         public LevelObjectiveSession(
@@ -72,110 +72,31 @@ namespace Gameplay
 
         void IRackDrainHost.RaiseStateChanged() => RaiseStateChanged();
 
-        public bool TryPeekCollectDestination(TileKind kind, out TileCollectDestination destination, out TileCollectResult failureReason)
-        {
-            destination = default;
-            failureReason = TileCollectResult.ConsumedForOrder;
-
-            if (_failed || HasWon)
-            {
-                failureReason = TileCollectResult.SessionInactive;
-                return false;
-            }
-
-            if (TryFindProjectedOrderMatch(kind, out var slot, out var iconIdx))
-            {
-                destination = TileCollectDestination.ForOrderSlot(slot, iconIdx);
-                return true;
-            }
-
-            var projectedRackCount = _rack.Count + _reservationBook.RackDelta;
-            if (projectedRackCount >= _rack.Capacity)
-            {
-                failureReason = TileCollectResult.FailedRackFull;
-                return false;
-            }
-
-            destination = TileCollectDestination.ForRackSlot(projectedRackCount);
-            return true;
-        }
+        public bool TryPeekCollectDestination(TileKind kind, out TileCollectDestination destination, out TileCollectResult failureReason) =>
+            _reservations.TryPeekDestination(_collectContext, kind, out destination, out failureReason);
 
         /// <summary>
         /// Reserves a projected collect destination (order icon or rack slot) for an in-flight transaction.
         /// Returns false when the session is inactive or the projected rack is full.
         /// </summary>
-        public bool TryReserveCollect(TileKind kind, out CollectReservation reservation)
-        {
-            reservation = default;
-            if (_failed || HasWon) return false;
-
-            if (TryFindProjectedOrderMatch(kind, out var slot, out var iconIdx))
-            {
-                var destination = TileCollectDestination.ForOrderSlot(slot, iconIdx);
-                reservation = new CollectReservation(
-                    _reservationBook.NextId(),
-                    kind,
-                    destination,
-                    rackDelta: 0,
-                    orderSlot: slot,
-                    orderIcon: iconIdx);
-                _reservationBook.Add(reservation);
-                return true;
-            }
-
-            var projectedRackCount = _rack.Count + _reservationBook.RackDelta;
-            if (projectedRackCount >= _rack.Capacity)
-                return false;
-
-            var rackDestination = TileCollectDestination.ForRackSlot(projectedRackCount);
-            reservation = new CollectReservation(
-                _reservationBook.NextId(),
-                kind,
-                rackDestination,
-                rackDelta: 1);
-            _reservationBook.Add(reservation);
-            return true;
-        }
+        public bool TryReserveCollect(TileKind kind, out CollectReservation reservation) =>
+            _reservations.TryReserveCollect(_collectContext, kind, out reservation);
 
         /// <summary>
         /// Reserves the order icon and projected rack slot freed by a rack→order drain step.
         /// </summary>
-        public bool TryReserveRackDrain(
-            TileKind kind,
-            TileCollectDestination orderDestination,
-            out CollectReservation reservation)
-        {
-            reservation = default;
-            if (_failed || HasWon) return false;
-
-            var slot = orderDestination.ActiveOrderSlotIndex;
-            var icon = orderDestination.OrderIconIndex;
-            if (_reservationBook.IsIconReserved(slot, icon))
-                return false;
-
-            if (_orderSlots.GetActiveSlot(slot, out _, out _, out var fulfilled) && fulfilled[icon])
-                return false;
-
-            reservation = new CollectReservation(
-                _reservationBook.NextId(),
-                kind,
-                orderDestination,
-                rackDelta: -1,
-                orderSlot: slot,
-                orderIcon: icon);
-            _reservationBook.Add(reservation);
-            return true;
-        }
+        public bool TryReserveRackDrain(TileKind kind, TileCollectDestination orderDestination, out CollectReservation reservation) =>
+            _reservations.TryReserveRackDrain(_collectContext, kind, orderDestination, out reservation);
 
         public TileCollectResult CommitReservation(CollectReservation reservation)
         {
-            _reservationBook.Remove(reservation.Id);
+            _reservations.Release(reservation);
             return TryCollectTile(reservation.Kind);
         }
 
-        public void CancelReservation(CollectReservation reservation) => _reservationBook.Remove(reservation.Id);
+        public void CancelReservation(CollectReservation reservation) => _reservations.Release(reservation);
 
-        public void CancelAllReservations() => _reservationBook.Clear();
+        public void CancelAllReservations() => _reservations.ReleaseAll();
 
         public TileCollectResult TryCollectTile(TileKind kind) =>
             TryCollectTile(BoardCell.FromKind(kind));
@@ -190,33 +111,5 @@ namespace Gameplay
         }
 
         void RaiseStateChanged() => StateChanged?.Invoke();
-
-        bool TryFindProjectedOrderMatch(TileKind kind, out int activeOrderSlot, out int iconIndexInOrder)
-        {
-            activeOrderSlot = -1;
-            iconIndexInOrder = -1;
-
-            for (var s = 0; ; s++)
-            {
-                if (_orderSlots.IsSlotIdle(s))
-                    continue;
-
-                if (!_orderSlots.GetActiveSlot(s, out _, out var orderSpec, out var fulfilled))
-                    break;
-
-                for (var i = 0; i < orderSpec.Length; i++)
-                {
-                    if (fulfilled[i]) continue;
-                    if (_reservationBook.IsIconReserved(s, i)) continue;
-                    if (orderSpec.GetIcon(i) != kind) continue;
-
-                    activeOrderSlot = s;
-                    iconIndexInOrder = i;
-                    return true;
-                }
-            }
-
-            return false;
-        }
     }
 }

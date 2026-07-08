@@ -3,18 +3,20 @@ using LevelData;
 
 namespace LevelData.Board
 {
-    /// <summary>Evaluates base rules plus per-behavior clickability contributors.</summary>
+    /// <summary>Evaluates base rules plus the per-behavior clickability gate resolved from the catalog.</summary>
     public sealed class ClickabilityPipeline
     {
         readonly IReadOnlyList<IClickabilityRule> _baseRules;
+        readonly TileBehaviorCatalog _behaviors;
 
-        public ClickabilityPipeline(IReadOnlyList<IClickabilityRule> baseRules)
+        public ClickabilityPipeline(IReadOnlyList<IClickabilityRule> baseRules, TileBehaviorCatalog behaviors = null)
         {
             _baseRules = baseRules ?? new IClickabilityRule[] { LayerOcclusionRule.Instance };
+            _behaviors = behaviors ?? TileBehaviorCatalog.CreateDefault();
         }
 
-        public static ClickabilityPipeline CreateDefault() =>
-            new ClickabilityPipeline(new IClickabilityRule[] { LayerOcclusionRule.Instance });
+        public static ClickabilityPipeline CreateDefault(TileBehaviorCatalog behaviors = null) =>
+            new ClickabilityPipeline(new IClickabilityRule[] { LayerOcclusionRule.Instance }, behaviors);
 
         public bool IsClickable(PlayableBoardState board, int x, int y, int layer)
         {
@@ -33,15 +35,7 @@ namespace LevelData.Board
                     return false;
             }
 
-            var contributors = TileBehaviorContributorProvider.GetClickabilityContributors(cell.BehaviorId);
-            for (var i = 0; i < contributors.Count; i++)
-            {
-                var c = contributors[i];
-                if (c != null && !c.IsClickable(board, x, y, layer, cell))
-                    return false;
-            }
-
-            return true;
+            return _behaviors.Resolve(cell.BehaviorId).IsClickable(board, x, y, layer, cell);
         }
     }
 }

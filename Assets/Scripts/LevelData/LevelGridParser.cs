@@ -90,12 +90,28 @@ namespace LevelData
             var cells = new TileKind?[width * height * depth];
             System.Array.Clear(cells, 0, cells.Length);
 
+            var hasBehaviors = dto.Behaviors != null;
+            if (hasBehaviors && dto.Behaviors.Count != depth)
+            {
+                error = $"behaviors layer count ({dto.Behaviors.Count}) must equal depth ({depth}).";
+                return false;
+            }
+
+            var behaviorIds = hasBehaviors ? new string[width * height * depth] : null;
+
             for (var l = 0; l < depth; l++)
             {
                 var layer = dto.Matrix3D[l];
                 if (layer == null || layer.Count != height)
                 {
                     error = $"Layer {l}: expected {height} rows (height).";
+                    return false;
+                }
+
+                var behaviorLayer = hasBehaviors ? dto.Behaviors[l] : null;
+                if (hasBehaviors && (behaviorLayer == null || behaviorLayer.Count != height))
+                {
+                    error = $"behaviors layer {l}: expected {height} rows (height).";
                     return false;
                 }
 
@@ -108,6 +124,13 @@ namespace LevelData
                         return false;
                     }
 
+                    var behaviorRow = behaviorLayer?[y];
+                    if (hasBehaviors && (behaviorRow == null || behaviorRow.Count != width))
+                    {
+                        error = $"behaviors layer {l}, row {y}: expected {width} columns (width).";
+                        return false;
+                    }
+
                     for (var x = 0; x < width; x++)
                     {
                         var v = row[x];
@@ -117,12 +140,25 @@ namespace LevelData
                             return false;
                         }
 
-                        cells[Index(width, height, x, y, l)] = kind;
+                        var index = Index(width, height, x, y, l);
+                        cells[index] = kind;
+
+                        if (behaviorIds != null)
+                        {
+                            var behaviorId = behaviorRow[x];
+                            if (kind == null && !string.IsNullOrWhiteSpace(behaviorId) && behaviorId != Board.BoardCell.StandardBehaviorId)
+                            {
+                                error = $"behaviors layer {l}, cell ({x},{y}): behavior \"{behaviorId}\" set on an empty cell (-1).";
+                                return false;
+                            }
+
+                            behaviorIds[index] = behaviorId;
+                        }
                     }
                 }
             }
 
-            var spec = new LevelBoardSpec(width, height, depth, cells);
+            var spec = new LevelBoardSpec(width, height, depth, cells, behaviorIds);
             if (!LevelLayoutRules.Validate(spec, out var layoutError))
             {
                 error = layoutError;

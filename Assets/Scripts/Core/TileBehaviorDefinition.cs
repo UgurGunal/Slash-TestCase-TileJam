@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace Core
@@ -8,5 +7,12 @@ namespace Core
     {
         [Tooltip("Stable id referenced by BoardCell.BehaviorId (e.g. standard, locked, ice).")]
         public string id = "standard";
+
+        [Header("Visuals (optional)")]
+        [Tooltip("Overlay sprite drawn on top of the tile icon (e.g. lock, ice). Leave empty for none.")]
+        public Sprite overlaySprite;
+
+        [Tooltip("Multiplied with the tile's base colors so a behavior reads at a glance even without an overlay sprite.")]
+        public Color tintColor = Color.white;
     }
 }

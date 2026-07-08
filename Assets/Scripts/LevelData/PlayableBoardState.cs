@@ -17,7 +17,7 @@ namespace LevelData
             for (var l = 0; l < Depth; l++)
             for (var y = 0; y < Height; y++)
             for (var x = 0; x < Width; x++)
-                _cells[Index(x, y, l)] = BoardCell.FromNullable(spec.GetNullable(x, y, l));
+                _cells[Index(x, y, l)] = spec.GetBoardCell(x, y, l);
         }
 
         public int Width { get; }
