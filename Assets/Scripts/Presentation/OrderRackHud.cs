@@ -3,21 +3,37 @@ using DG.Tweening;
 using Gameplay;
 using Presentation.Hud;
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.Serialization;
 
 namespace Presentation
 {
-    /// <summary>Thin facade: session binding and destination layout for collect fly targets.</summary>
-    public sealed class OrderRackHud : MonoBehaviour, IHudDestinationLayout
+    /// <summary>Thin facade: session binding and access to the live destination layout for collect fly targets.</summary>
+    public sealed class OrderRackHud : MonoBehaviour
     {
         [SerializeField] TileIconLibrary iconLibrary;
-        [SerializeField] bool orderStripCompleteScaleAnimation = true;
-        [SerializeField] float orderStripCompleteScaleDownSec = 0.22f;
-        [SerializeField] Ease orderStripCompleteScaleDownEase = Ease.InQuad;
-        [SerializeField] float orderStripCompleteScaleUpSec = 0.28f;
-        [SerializeField] Ease orderStripCompleteScaleUpEase = Ease.OutBack;
+
+        [FormerlySerializedAs("orderStripCompleteScaleAnimation")]
+        [SerializeField] bool orderCompleteScaleAnimation = true;
+        [FormerlySerializedAs("orderStripCompleteScaleDownSec")]
+        [SerializeField] float orderCompleteScaleDownSec = 0.22f;
+        [FormerlySerializedAs("orderStripCompleteScaleDownEase")]
+        [SerializeField] Ease orderCompleteScaleDownEase = Ease.InQuad;
+        [FormerlySerializedAs("orderStripCompleteScaleUpSec")]
+        [SerializeField] float orderCompleteScaleUpSec = 0.28f;
+        [FormerlySerializedAs("orderStripCompleteScaleUpEase")]
+        [SerializeField] Ease orderCompleteScaleUpEase = Ease.OutBack;
 
         OrderRackHudBinder _controller;
+
+        /// <summary>Live rect resolver for order icons and rack slots; rebuilt when the session or views change.</summary>
+        public IHudDestinationLayout DestinationLayout
+        {
+            get
+            {
+                EnsureController();
+                return _controller?.DestinationLayout;
+            }
+        }
 
         void OnEnable()
         {
@@ -39,38 +55,17 @@ namespace Presentation
             _controller.ConfigureViews(orderViews, rack, orderSlotPrefab);
         }
 
-        public bool TryGetRackSlotImage(int index, out Image img)
-        {
-            img = null;
-            if (!EnsureController()) return false;
-            return _controller.DestinationLayout.TryGetRackSlotImage(index, out img);
-        }
-
-        public bool TryGetRackSlotImages(out Image[] images)
-        {
-            images = null;
-            if (!EnsureController()) return false;
-            return _controller.DestinationLayout.TryGetRackSlotImages(out images);
-        }
-
-        public bool TryGetOrderIconRectTransform(int activeOrderSlot, int iconIdx, out RectTransform rect)
-        {
-            rect = null;
-            if (!EnsureController()) return false;
-            return _controller.DestinationLayout.TryGetOrderIconRectTransform(activeOrderSlot, iconIdx, out rect);
-        }
-
         bool EnsureController()
         {
             if (_controller != null) return true;
 
             _controller = new OrderRackHudBinder(
                 iconLibrary,
-                orderStripCompleteScaleAnimation,
-                orderStripCompleteScaleDownSec,
-                orderStripCompleteScaleDownEase,
-                orderStripCompleteScaleUpSec,
-                orderStripCompleteScaleUpEase);
+                orderCompleteScaleAnimation,
+                orderCompleteScaleDownSec,
+                orderCompleteScaleDownEase,
+                orderCompleteScaleUpSec,
+                orderCompleteScaleUpEase);
             return true;
         }
     }

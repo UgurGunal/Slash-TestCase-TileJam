@@ -5,6 +5,7 @@ using LevelData;
 using LevelData.Board;
 using Presentation.Hud;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Presentation
 {
@@ -17,7 +18,6 @@ namespace Presentation
         readonly LevelBoardGrid _grid;
         TileCollectFly _collectFly;
         OrderRackHud _orderRackHud;
-        CollectDestinationResolver _destinationResolver;
 
         LevelObjectiveSession _session;
         readonly RackDrainService _rackDrain = new RackDrainService();
@@ -28,14 +28,10 @@ namespace Presentation
         public BoardTileCollectCoordinator(LevelBoardGrid grid) =>
             _grid = grid ?? throw new ArgumentNullException(nameof(grid));
 
-        public void SetPresentationRefs(TileCollectFly collectFly, OrderRackHud orderRackHud) =>
-            SetPresentationRefs(collectFly, orderRackHud as IHudDestinationLayout);
-
-        public void SetPresentationRefs(TileCollectFly collectFly, IHudDestinationLayout destinationLayout)
+        public void SetPresentationRefs(TileCollectFly collectFly, OrderRackHud orderRackHud)
         {
             _collectFly = collectFly;
-            _orderRackHud = destinationLayout as OrderRackHud;
-            _destinationResolver = destinationLayout != null ? new CollectDestinationResolver(destinationLayout) : null;
+            _orderRackHud = orderRackHud;
         }
 
         public void SetGameplayRules(GameplayRulesContext rules) => _rules = rules;
@@ -56,7 +52,7 @@ namespace Presentation
             var boardCell = _grid.PlayState.GetCell(x, y, l);
             if (!IsClickable(x, y, l, boardCell)) return;
 
-            if (_collectFly == null || !_collectFly.UseAnimation || _destinationResolver == null)
+            if (_collectFly == null || !_collectFly.UseAnimation || _orderRackHud == null)
             {
                 CollectTileInstant(view, x, y, l, boardCell);
                 return;
@@ -68,7 +64,7 @@ namespace Presentation
                 return;
             }
 
-            if (!_destinationResolver.TryResolve(destination, out var targetRt))
+            if (!TryResolveDestination(destination, out var targetRt))
             {
                 CollectTileInstant(view, x, y, l, boardCell);
                 return;
@@ -191,7 +187,7 @@ namespace Presentation
             }
 
             var boardRoot = _grid.BoardRoot;
-            if (_collectFly == null || !_collectFly.UseAnimation || _orderRackHud == null || _destinationResolver == null || boardRoot == null)
+            if (_collectFly == null || !_collectFly.UseAnimation || _orderRackHud == null || boardRoot == null)
             {
                 FinishRackDrainSynchronously();
                 EndTileCollectFlight();
@@ -200,7 +196,7 @@ namespace Presentation
 
             while (_rackDrain.TryPeekStep(_session, out var rackIdx, out _, out var orderDestination))
             {
-                if (!_orderRackHud.TryGetRackSlotImage(rackIdx, out var rackImg))
+                if (!TryGetRackSlotImage(rackIdx, out var rackImg))
                 {
                     var r = _rackDrain.ApplyStepAt(_session, rackIdx);
                     _session.NotifyStateChanged();
@@ -214,7 +210,7 @@ namespace Presentation
                     continue;
                 }
 
-                if (!_destinationResolver.TryResolve(orderDestination, out var targetRt))
+                if (!TryResolveDestination(orderDestination, out var targetRt))
                 {
                     FinishRackDrainSynchronously();
                     EndTileCollectFlight();
@@ -267,5 +263,20 @@ namespace Presentation
 
         bool ShouldRemoveFromBoard(BoardCell cell) =>
             _rules == null || _rules.CanRemoveFromBoard(cell);
+
+        bool TryResolveDestination(TileCollectDestination destination, out RectTransform rect)
+        {
+            rect = null;
+            var layout = _orderRackHud?.DestinationLayout;
+            if (layout == null) return false;
+            return new CollectDestinationResolver(layout).TryResolve(destination, out rect);
+        }
+
+        bool TryGetRackSlotImage(int rackIdx, out Image rackImg)
+        {
+            rackImg = null;
+            var layout = _orderRackHud?.DestinationLayout;
+            return layout != null && layout.TryGetRackSlotImage(rackIdx, out rackImg);
+        }
     }
 }
