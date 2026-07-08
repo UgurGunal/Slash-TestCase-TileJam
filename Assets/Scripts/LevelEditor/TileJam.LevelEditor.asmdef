@@ -6,7 +6,9 @@
         "TileJam.LevelData",
         "TileJam.Presentation"
     ],
-    "includePlatforms": [],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,
