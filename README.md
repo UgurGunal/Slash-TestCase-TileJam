@@ -1,66 +1,60 @@
 # Tile Jam
 
-Unity üzerinde geliştirilmiş bir tile match / order completion oyunu.  
-Tahtadaki taşlara tıkla, müşteri siparişlerini tamamla; rack dolmadan level'ı bitir.
+![Screenshot 1](Docs/ScreenShots/Image%20Sequence_001_0000.png)
+![Screenshot 2](Docs/ScreenShots/Image%20Sequence_002_0000.png)
+![Screenshot 3](Docs/ScreenShots/Image%20Sequence_003_0000.png)
+![Screenshot 4](Docs/ScreenShots/Image%20Sequence_004_0000.png)
+![Screenshot 5](Docs/ScreenShots/Image%20Sequence_005_0000.png)
+
+A tile match / order completion game built in Unity.  
+Tap tiles on the board, fulfill customer orders, and finish the level before the rack fills up.
 
 ---
 
-## Oyun
+## How to play
 
-Tahtadaki tile'lara tıklayarak onları üstteki siparişlere gönderirsin.
+Tap tiles on the board to send them to the orders above.
 
-- Siparişteki tüm ikonlar dolunca müşteri tamamlanır, sıradaki gelir.
-- Uygun sipariş yoksa tile geçici depoya (**rack**) gider.
-- Rack dolarsa level kaybedilir.
-
----
-
-## Ekran görüntüleri
-
-<!-- Görsellerini buraya ekle. Örnek: -->
-<!-- ![Gameplay](Docs/Screenshots/gameplay.png) -->
-<!-- ![Level Editor](Docs/Screenshots/level-editor.png) -->
-
-| Gameplay | Level Editor |
-|:--------:|:------------:|
-| *görsel ekle* | *görsel ekle* |
+- When every icon in an order is filled, that customer is complete and the next one arrives.
+- If no matching order is available, the tile goes to the temporary storage (**rack**).
+- If the rack fills up, you lose the level.
 
 ---
 
-## Teknik
+## Tech
 
 | | |
 |---|---|
 | **Engine** | Unity 6 (`6000.0.62f1`) |
 | **Render** | URP 2D |
-| **Animasyon** | DOTween |
+| **Animation** | DOTween |
 
-Kod katmanlı assembly yapısında:
+Code is split into layered assemblies:
 
 `Core` → `LevelData` → `Gameplay` → `Presentation` → `LevelEditor`
 
-Gameplay kuralları Unity'den bağımsız saf C#; level verisi JSON üzerinden yüklenir. Detaylı mimari için: [`Docs/Proje-Mimarisi.md`](Docs/Proje-Mimarisi.md)
+Gameplay rules are plain C# with no Unity dependency; levels load from JSON. For architecture details, see [`Docs/Proje-Mimarisi.md`](Docs/Proje-Mimarisi.md).
 
 ---
 
-## Nasıl çalıştırılır
+## Getting started
 
-1. Unity Hub ile projeyi aç (Unity **6000.0.62f1** veya uyumlu sürüm).
-2. `Assets/Scenes/Main.unity` sahnesini aç.
-3. Play'e bas.
+1. Open the project in Unity Hub (Unity **6000.0.62f1** or a compatible version).
+2. Open `Assets/Scenes/Main.unity`.
+3. Hit Play.
 
-Level'lar `Assets/Resources/Levels/` altında JSON olarak durur.  
-Özel level yazmak için Unity menüsünden Level Editor penceresini kullanabilirsin.
+Levels live under `Assets/Resources/Levels/` as JSON.  
+Use the Level Editor window in Unity to author custom levels.
 
 ---
 
-## Proje yapısı
+## Project structure
 
 ```
 Assets/Scripts/
-├── Core/           # TileKind, sabitler
-├── LevelData/      # JSON parse, board şeması
-├── Gameplay/       # Order / rack kuralları
-├── Presentation/   # UI, tahta, animasyon
-└── LevelEditor/    # Editör aracı
+├── Core/           # TileKind, constants
+├── LevelData/      # JSON parsing, board schema
+├── Gameplay/       # Order / rack rules
+├── Presentation/   # UI, board, animation
+└── LevelEditor/    # Editor tool
 ```

@@ -122,8 +122,8 @@ namespace Presentation
                 return;
             }
 
-            SetEndPanels(win: false, lose: false);
-            boardLoader.TryLoadNextLevel();
+            if (boardLoader.TryLoadNextLevel())
+                SetEndPanels(win: false, lose: false);
         }
     }
 }

@@ -2,7 +2,7 @@
 
 Bu doküman, projeye yeni gelen biri için yazıldı. Oyunun ne yaptığını, kodun hangi parçalara ayrıldığını ve bir tile tıklandığında neler olduğunu anlatır.
 
-## Oyunu 30 saniyede anlamak
+## Oyunu özeti
 
 Oyuncu tahtadaki **tile**'lara tıklar. Tıklanan tile:
 
